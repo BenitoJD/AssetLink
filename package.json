@@ -1,0 +1,17 @@
+{
+  "name": "assetlink",
+  "version": "1.0.0",
+  "description": "Minimal image upload API backed by MinIO",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js"
+  },
+  "dependencies": {
+    "busboy": "^1.6.0",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "minio": "^8.0.6",
+    "mime-types": "^2.1.35"
+  }
+}
