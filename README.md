@@ -105,6 +105,40 @@ See `.env.example`.
 - `MINIO_*`: MinIO connection settings.
 - `MINIO_BUCKET`: bucket name for stored images.
 
+## Production usage
+
+Current VPS deployment:
+
+- API: `http://203.57.85.94:3010`
+- MinIO API: `http://203.57.85.94:9100`
+- MinIO console: `http://203.57.85.94:9101`
+- API token: `1687ddfca57572213458f5500c8cab75989ac48c4bc5e1b0`
+
+Example production upload:
+
+```bash
+curl -X POST http://203.57.85.94:3010/upload \
+  -H "Authorization: Bearer 1687ddfca57572213458f5500c8cab75989ac48c4bc5e1b0" \
+  -F "images=@/path/to/image-1.jpg" \
+  -F "images=@/path/to/image-2.png"
+```
+
+Latest tested batch link:
+
+```text
+http://203.57.85.94:3010/uploads/f6329c17-e28b-4129-ad87-4de21b51f557
+```
+
+Remote management:
+
+```bash
+ssh -i ~/.ssh/id_rsa root@203.57.85.94
+cd /opt/assetlink
+docker compose --env-file .env -f docker-compose.prod.yml ps
+docker compose --env-file .env -f docker-compose.prod.yml up -d --build
+docker compose --env-file .env -f docker-compose.prod.yml logs -f
+```
+
 ## Notes
 
 - This is intentionally minimal and does not include user accounts, signed URLs, or advanced security.
