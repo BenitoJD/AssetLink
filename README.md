@@ -112,13 +112,13 @@ Current VPS deployment:
 - API: `http://203.57.85.94:3010`
 - MinIO API: `http://203.57.85.94:9100`
 - MinIO console: `http://203.57.85.94:9101`
-- API token: `1687ddfca57572213458f5500c8cab75989ac48c4bc5e1b0`
+- API token: `1687ddfca57572213458f5500c8cab`
 
 Example production upload:
 
 ```bash
 curl -X POST http://203.57.85.94:3010/upload \
-  -H "Authorization: Bearer 1687ddfca57572213458f5500c8cab75989ac48c4bc5e1b0" \
+  -H "Authorization: Bearer 1687ddfca5757221345" \
   -F "images=@/path/to/image-1.jpg" \
   -F "images=@/path/to/image-2.png"
 ```
