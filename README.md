@@ -111,15 +111,16 @@ See `.env.example`.
 
 Current VPS deployment:
 
-- API: `http://203.57.85.94:3010`
+- API: `https://203.57.85.94:3010`
 - MinIO API: `http://203.57.85.94:9100`
 - MinIO console: `http://203.57.85.94:9101`
 - API token: `1687ddfca57572213458f5500c8cab`
+- HTTPS on the app port uses a self-signed certificate, so browsers will warn until you trust it.
 
 Example production upload:
 
 ```bash
-curl -X POST http://203.57.85.94:3010/upload \
+curl -k -X POST https://203.57.85.94:3010/upload \
   -H "Authorization: Bearer 1687ddfca5757221345" \
   -F "images=@/path/to/image-1.jpg" \
   -F "images=@/path/to/image-2.png"
@@ -128,7 +129,7 @@ curl -X POST http://203.57.85.94:3010/upload \
 Latest tested batch link:
 
 ```text
-http://203.57.85.94:3010/uploads/f6329c17-e28b-4129-ad87-4de21b51f557
+https://203.57.85.94:3010/uploads/f6329c17-e28b-4129-ad87-4de21b51f557
 ```
 
 Remote management:

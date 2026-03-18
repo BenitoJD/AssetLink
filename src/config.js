@@ -20,6 +20,10 @@ module.exports = {
   port: Number(process.env.PORT || 3000),
   apiToken: required("API_TOKEN", "super-secret-token"),
   publicBaseUrl: required("PUBLIC_BASE_URL", "http://localhost:3000"),
+  https: {
+    keyFile: process.env.HTTPS_KEY_FILE || "",
+    certFile: process.env.HTTPS_CERT_FILE || ""
+  },
   minio: {
     endPoint: required("MINIO_END_POINT", "127.0.0.1"),
     port: Number(process.env.MINIO_PORT || 9000),

@@ -7,6 +7,8 @@ services:
       - minio
     ports:
       - "${APP_PORT:-3010}:3000"
+    volumes:
+      - ./certs:/certs:ro
     environment:
       PORT: 3000
       API_TOKEN: ${API_TOKEN:-super-secret-token}
@@ -16,7 +18,9 @@ services:
       MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:-assetlink}
       MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:-assetlink-secret}
       MINIO_BUCKET: ${MINIO_BUCKET:-assetlink-images}
-      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost:3010}
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-https://localhost:3010}
+      HTTPS_KEY_FILE: /certs/assetlink.key
+      HTTPS_CERT_FILE: /certs/assetlink.crt
 
   minio:
     image: minio/minio:RELEASE.2023-03-20T20-16-18Z

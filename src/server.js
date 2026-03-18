@@ -1,4 +1,7 @@
 const crypto = require("crypto");
+const fs = require("fs");
+const http = require("http");
+const https = require("https");
 const path = require("path");
 
 const busboy = require("busboy");
@@ -67,6 +70,33 @@ async function saveBatchManifest(batchId, images) {
 async function getBatchManifest(batchId) {
   const buffer = await getObjectBuffer(batchManifestKey(batchId));
   return JSON.parse(buffer.toString("utf8"));
+}
+
+function createListeningServer() {
+  const keyFile = config.https.keyFile;
+  const certFile = config.https.certFile;
+
+  if (!keyFile && !certFile) {
+    return {
+      protocol: "http",
+      server: http.createServer(app)
+    };
+  }
+
+  if (!keyFile || !certFile) {
+    throw new Error("HTTPS_KEY_FILE and HTTPS_CERT_FILE must both be set to enable HTTPS");
+  }
+
+  const key = fs.readFileSync(keyFile);
+  const cert = fs.readFileSync(certFile);
+
+  return {
+    protocol: "https",
+    server: https.createServer({
+      key,
+      cert
+    }, app)
+  };
 }
 
 function escapeHtml(value) {
@@ -1122,8 +1152,10 @@ app.use((error, req, res, next) => {
 
 ensureBucket()
   .then(() => {
-    app.listen(config.port, () => {
-      console.log(`AssetLink listening on port ${config.port}`);
+    const { protocol, server } = createListeningServer();
+
+    server.listen(config.port, () => {
+      console.log(`AssetLink listening on ${protocol} port ${config.port}`);
     });
   })
   .catch((error) => {
