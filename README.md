@@ -7,7 +7,7 @@ Minimal image upload API backed by MinIO. Each upload request creates its own ba
 
 - `POST /upload` uploads images to MinIO.
 - Response includes direct image links and a batch-specific link.
-- `GET /uploads/:batchId` shows only the images from that one upload.
+- `GET /uploads/:batchId` shows only the images from that one upload in a full-size carousel.
 - `GET /uploads/:batchId/json` returns the same batch as JSON.
 - Very basic auth using a single bearer token.
 - Uploads stream directly to MinIO instead of buffering whole files in memory.
@@ -95,6 +95,8 @@ Open this in the browser:
 ```text
 http://localhost:3000/uploads/<batchId>
 ```
+
+Use the left/right arrows, dots, or swipe gestures to move through the images one by one.
 
 ## Environment variables
 
