@@ -1,13 +1,16 @@
 
 # AssetLink
 
-Minimal image upload API backed by MinIO. Each upload request creates its own batch link, so if you upload 10 images in one POST, the returned link shows only those 10 images.
+Minimal image and text upload API backed by MinIO. Each upload request creates its own batch link, so if you upload 10 images or text files in one POST, the returned link shows only that batch.
 
 ## What it does
 
+- `GET /` returns basic API information.
 - `POST /upload` uploads images to MinIO.
-- Response includes direct image links and a batch-specific link.
-- `GET /uploads/:batchId` shows only the images from that one upload in a full-size carousel.
+- `POST /upload-text` uploads text-based files to MinIO.
+- Response includes direct asset links and a batch-specific link.
+- `GET /uploads/:batchId` shows images in a carousel or text files in a browser reader.
+- `GET /uploads/:batchId/text/:assetIndex` returns paged text chunks for long-file viewing.
 - `GET /uploads/:batchId/json` returns the same batch as JSON.
 - Very basic auth using a single bearer token.
 - Uploads stream directly to MinIO instead of buffering whole files in memory.
@@ -82,6 +85,39 @@ Example response:
 }
 ```
 
+### Upload text files
+
+Use multipart form data with field name `texts`.
+
+Accepted files include text-like formats such as `.txt`, `.md`, `.csv`, `.json`, `.log`, `.xml`, `.yaml`, `.yml`, `.html`, `.js`, `.ts`, and `text/*` uploads.
+
+```bash
+curl -X POST http://localhost:3000/upload-text \
+  -H "Authorization: Bearer super-secret-token" \
+  -F "texts=@/path/to/notes.txt" \
+  -F "texts=@/path/to/readme.md"
+```
+
+Example response:
+
+```json
+{
+  "message": "Text files uploaded successfully",
+  "batchId": "0d4f5d4f-8e2b-4f33-bfd9-1e4d364e9f83",
+  "batchUrl": "http://localhost:3000/uploads/0d4f5d4f-8e2b-4f33-bfd9-1e4d364e9f83",
+  "batchJsonUrl": "http://localhost:3000/uploads/0d4f5d4f-8e2b-4f33-bfd9-1e4d364e9f83/json",
+  "texts": [
+    {
+      "type": "text",
+      "originalName": "notes.txt",
+      "objectKey": "1710000000000-uuid.txt",
+      "mimeType": "text/plain",
+      "url": "http://localhost:3000/assets/1710000000000-uuid.txt"
+    }
+  ]
+}
+```
+
 ### View one upload batch
 
 ```bash
@@ -96,7 +132,32 @@ Open this in the browser:
 http://localhost:3000/uploads/<batchId>
 ```
 
-Use the left/right arrows, dots, or swipe gestures to move through the images one by one.
+Image batches use left/right arrows, dots, or swipe gestures. Text batches show a reader with file tabs. Long text files are loaded in chunks, so files larger than 2 MB can be viewed without embedding the entire file in the page.
+
+### Load text chunks
+
+The text viewer uses this endpoint automatically. You can also call it directly:
+
+```bash
+curl "http://localhost:3000/uploads/<batchId>/text/0?offset=0&limit=131072"
+```
+
+Response:
+
+```json
+{
+  "batchId": "0d4f5d4f-8e2b-4f33-bfd9-1e4d364e9f83",
+  "assetIndex": 0,
+  "originalName": "notes.txt",
+  "mimeType": "text/plain",
+  "offset": 0,
+  "nextOffset": 131072,
+  "limit": 131072,
+  "size": 10485760,
+  "hasMore": true,
+  "content": "..."
+}
+```
 
 ## Environment variables
 
@@ -105,7 +166,7 @@ See `.env.example`.
 - `API_TOKEN`: bearer token for uploads.
 - `PUBLIC_BASE_URL`: base URL used in returned links.
 - `MINIO_*`: MinIO connection settings.
-- `MINIO_BUCKET`: bucket name for stored images.
+- `MINIO_BUCKET`: bucket name for stored assets.
 
 ## Production usage
 

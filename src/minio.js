@@ -61,8 +61,23 @@ function getObjectStream(objectName) {
   return client.getObject(bucketName, objectName);
 }
 
+function getObjectRangeStream(objectName, offset, length) {
+  return client.getPartialObject(bucketName, objectName, offset, length);
+}
+
 async function getObjectBuffer(objectName) {
   const stream = await client.getObject(bucketName, objectName);
+  const chunks = [];
+
+  return new Promise((resolve, reject) => {
+    stream.on("data", (chunk) => chunks.push(chunk));
+    stream.on("end", () => resolve(Buffer.concat(chunks)));
+    stream.on("error", reject);
+  });
+}
+
+async function getObjectRangeBuffer(objectName, offset, length) {
+  const stream = await getObjectRangeStream(objectName, offset, length);
   const chunks = [];
 
   return new Promise((resolve, reject) => {
@@ -98,6 +113,8 @@ module.exports = {
   bucketName,
   ensureBucket,
   getObjectBuffer,
+  getObjectRangeBuffer,
+  getObjectRangeStream,
   getObjectStream,
   listObjects,
   statObject,

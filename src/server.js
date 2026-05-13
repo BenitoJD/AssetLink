@@ -12,6 +12,7 @@ const config = require("./config");
 const {
   ensureBucket,
   getObjectBuffer,
+  getObjectRangeBuffer,
   getObjectStream,
   listObjects,
   statObject,
@@ -20,6 +21,44 @@ const {
 } = require("./minio");
 
 const app = express();
+
+const TEXT_CHUNK_BYTES = 128 * 1024;
+const MAX_TEXT_CHUNK_BYTES = 1024 * 1024;
+const TEXT_UPLOAD_FIELDS = new Set(["texts", "files"]);
+const TEXT_EXTENSIONS = new Set([
+  ".conf",
+  ".csv",
+  ".env",
+  ".htm",
+  ".html",
+  ".ini",
+  ".js",
+  ".json",
+  ".jsonl",
+  ".log",
+  ".md",
+  ".markdown",
+  ".properties",
+  ".rtf",
+  ".sql",
+  ".ts",
+  ".tsv",
+  ".txt",
+  ".xml",
+  ".yaml",
+  ".yml"
+]);
+const TEXT_MIME_TYPES = new Set([
+  "application/json",
+  "application/ld+json",
+  "application/rtf",
+  "application/toml",
+  "application/x-javascript",
+  "application/x-ndjson",
+  "application/x-yaml",
+  "application/xml",
+  "application/yaml"
+]);
 
 function requireToken(req, res, next) {
   const header = req.header("authorization");
@@ -47,14 +86,55 @@ function safeObjectName(originalName) {
   return `${Date.now()}-${crypto.randomUUID()}${ext}`;
 }
 
+function isSupportedTextFile(originalName, mimeType) {
+  const normalizedMimeType = String(mimeType || "").toLowerCase().split(";")[0].trim();
+  const ext = path.extname(originalName || "").toLowerCase();
+
+  return normalizedMimeType.startsWith("text/")
+    || TEXT_MIME_TYPES.has(normalizedMimeType)
+    || TEXT_EXTENSIONS.has(ext);
+}
+
+function normalizeManifestAssets(manifest) {
+  if (Array.isArray(manifest.assets)) {
+    return manifest.assets;
+  }
+
+  const images = Array.isArray(manifest.images)
+    ? manifest.images.map((item) => ({
+      type: "image",
+      mimeType: item.mimeType || mime.lookup(item.objectKey) || "image/*",
+      ...item
+    }))
+    : [];
+
+  const texts = Array.isArray(manifest.texts)
+    ? manifest.texts.map((item) => ({
+      type: "text",
+      mimeType: item.mimeType || mime.lookup(item.objectKey) || "text/plain",
+      ...item
+    }))
+    : [];
+
+  return [...images, ...texts];
+}
+
 function batchManifestKey(batchId) {
   return `uploads/${batchId}.json`;
 }
 
-async function saveBatchManifest(batchId, images) {
+async function saveBatchManifest(batchId, assets) {
+  const normalizedAssets = assets.map((asset) => ({
+    ...asset,
+    url: asset.url || buildAssetUrl(asset.objectKey)
+  }));
+  const images = normalizedAssets.filter((asset) => asset.type === "image");
+  const texts = normalizedAssets.filter((asset) => asset.type === "text");
   const manifest = {
     batchId,
     createdAt: new Date().toISOString(),
+    assets: normalizedAssets,
+    texts,
     images
   };
 
@@ -109,7 +189,568 @@ function escapeHtml(value) {
     .replace(/'/g, "&#39;");
 }
 
-function buildBatchHtml(manifest) {
+function escapeTextHtml(value) {
+  return String(value)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+
+function formatBytes(value) {
+  const bytes = Number(value || 0);
+
+  if (bytes < 1024) {
+    return `${bytes} B`;
+  }
+
+  if (bytes < 1024 * 1024) {
+    return `${(bytes / 1024).toFixed(1)} KB`;
+  }
+
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function parseNonNegativeInteger(value, fallback) {
+  if (value === undefined) {
+    return fallback;
+  }
+
+  const parsed = Number(value);
+
+  if (!Number.isSafeInteger(parsed) || parsed < 0) {
+    return fallback;
+  }
+
+  return parsed;
+}
+
+function clampChunkLimit(value) {
+  const parsed = parseNonNegativeInteger(value, TEXT_CHUNK_BYTES);
+
+  if (parsed <= 0) {
+    return TEXT_CHUNK_BYTES;
+  }
+
+  return Math.min(parsed, MAX_TEXT_CHUNK_BYTES);
+}
+
+async function loadTextPreview(asset) {
+  const url = buildAssetUrl(asset.objectKey);
+  const baseAsset = {
+    ...asset,
+    url
+  };
+
+  try {
+    const meta = await statObject(asset.objectKey);
+    const size = Number(meta.size || 0);
+    const length = Math.min(TEXT_CHUNK_BYTES, size);
+    const buffer = length > 0
+      ? await getObjectRangeBuffer(asset.objectKey, 0, length)
+      : Buffer.alloc(0);
+    const nextOffset = buffer.length;
+
+    return {
+      ...baseAsset,
+      content: buffer.toString("utf8"),
+      previewError: "",
+      size,
+      nextOffset,
+      hasMore: nextOffset < size
+    };
+  } catch (error) {
+    return {
+      ...baseAsset,
+      content: "",
+      previewError: "Could not load this text preview.",
+      nextOffset: 0,
+      hasMore: false,
+      size: 0
+    };
+  }
+}
+
+async function buildTextBatchHtml(manifest, textAssets) {
+  const files = await Promise.all(textAssets.map(loadTextPreview));
+  const totalTexts = files.length;
+  const batchId = escapeHtml(manifest.batchId);
+  const batchUrl = buildBatchUrl(manifest.batchId);
+  const batchJsonUrl = `${batchUrl}/json`;
+  const createdAt = manifest.createdAt ? escapeHtml(manifest.createdAt) : "Unknown";
+
+  const tabs = files
+    .map((item, index) => {
+      const isActive = index === 0;
+      const safeName = escapeHtml(item.originalName || "Uploaded text");
+      const size = item.size ? ` · ${escapeHtml(formatBytes(item.size))}` : "";
+
+      return `
+        <button type="button" class="file-tab${isActive ? " is-active" : ""}" data-file-tab data-target-index="${index}" aria-selected="${isActive ? "true" : "false"}">
+          <span class="file-name">${safeName}</span>
+          <span class="file-meta">Text ${index + 1} of ${totalTexts}${size}</span>
+        </button>
+      `;
+    })
+    .join("");
+
+  const panels = files
+    .map((item, index) => {
+      const safeName = escapeHtml(item.originalName || "Uploaded text");
+      const safeMimeType = escapeHtml(item.mimeType || "text/plain");
+      const rawUrl = buildAssetUrl(item.objectKey);
+      const safeChunkUrl = `/uploads/${encodeURIComponent(manifest.batchId)}/text/${index}`;
+      const loadedLabel = `Loaded ${formatBytes(item.nextOffset || 0)} of ${formatBytes(item.size || 0)}`;
+      const preview = item.previewError
+        ? `<div class="preview-message">${escapeHtml(item.previewError)}</div>`
+        : `<pre class="text-preview" tabindex="0"><code data-text-content>${escapeTextHtml(item.content)}</code></pre>`;
+      const loadMoreButton = item.previewError ? "" : `
+              <button
+                type="button"
+                class="load-more"
+                data-load-more
+                data-chunk-url="${safeChunkUrl}"
+                data-next-offset="${item.nextOffset || 0}"
+                data-size="${item.size || 0}"
+                data-limit="${TEXT_CHUNK_BYTES}"
+                ${item.hasMore ? "" : "disabled"}
+              >${item.hasMore ? "Load more" : "Fully loaded"}</button>
+      `;
+
+      return `
+        <section class="text-panel" data-file-panel ${index === 0 ? "" : "hidden"}>
+          <div class="reader-header">
+            <div class="reader-title">
+              <p class="reader-kicker">${safeMimeType}</p>
+              <h2>${safeName}</h2>
+            </div>
+            <div class="reader-actions">
+              <span class="load-status" data-load-status>${escapeHtml(loadedLabel)}</span>
+              ${loadMoreButton}
+              <a href="${rawUrl}" target="_blank" rel="noreferrer" class="raw-link">Open raw file</a>
+            </div>
+          </div>
+          ${preview}
+        </section>
+      `;
+    })
+    .join("");
+
+  return `<!doctype html>
+  <html lang="en">
+    <head>
+      <meta charset="utf-8" />
+      <meta name="viewport" content="width=device-width, initial-scale=1" />
+      <title>AssetLink Text Batch ${batchId}</title>
+      <style>
+        :root {
+          color-scheme: light;
+          --bg: #f6f7f9;
+          --surface: #ffffff;
+          --surface-muted: #eef2f6;
+          --text: #151923;
+          --muted: #697386;
+          --accent: #2563eb;
+          --accent-strong: #1d4ed8;
+          --border: #d8dee8;
+          --shadow: 0 18px 45px rgba(21, 25, 35, 0.08);
+          --radius: 8px;
+          --font: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+          --font-mono: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+        }
+        * {
+          box-sizing: border-box;
+        }
+        body {
+          margin: 0;
+          min-height: 100vh;
+          min-height: 100dvh;
+          background: var(--bg);
+          color: var(--text);
+          font-family: var(--font);
+          line-height: 1.5;
+        }
+        main {
+          width: min(1280px, calc(100% - 32px));
+          margin: 0 auto;
+          padding: clamp(22px, 4vw, 44px) 0;
+        }
+        .topbar {
+          display: flex;
+          justify-content: space-between;
+          align-items: flex-end;
+          gap: 18px;
+          padding-bottom: 18px;
+          border-bottom: 1px solid var(--border);
+        }
+        .eyebrow {
+          margin: 0 0 8px;
+          color: var(--accent);
+          font-size: 0.78rem;
+          font-weight: 750;
+          letter-spacing: 0.12em;
+          text-transform: uppercase;
+        }
+        h1 {
+          margin: 0;
+          font-size: 3.6rem;
+          line-height: 1;
+          letter-spacing: 0;
+          overflow-wrap: anywhere;
+        }
+        .batch-meta {
+          margin: 10px 0 0;
+          color: var(--muted);
+          overflow-wrap: anywhere;
+        }
+        .actions {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 10px;
+          justify-content: flex-end;
+        }
+        .actions a,
+        .raw-link,
+        .load-more {
+          appearance: none;
+          min-height: 42px;
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          border: 1px solid var(--border);
+          border-radius: var(--radius);
+          background: var(--surface);
+          color: var(--accent-strong);
+          padding: 0 13px;
+          text-decoration: none;
+          font-weight: 700;
+          box-shadow: 0 8px 24px rgba(21, 25, 35, 0.06);
+          cursor: pointer;
+          font: inherit;
+        }
+        .load-more {
+          background: var(--accent);
+          border-color: var(--accent);
+          color: #ffffff;
+        }
+        .load-more:disabled {
+          background: var(--surface-muted);
+          border-color: var(--border);
+          color: var(--muted);
+          cursor: default;
+          box-shadow: none;
+        }
+        .reader-layout {
+          margin-top: 22px;
+          display: grid;
+          grid-template-columns: minmax(230px, 300px) minmax(0, 1fr);
+          gap: 18px;
+          align-items: start;
+        }
+        .file-list {
+          display: grid;
+          gap: 8px;
+        }
+        .file-tab {
+          appearance: none;
+          width: 100%;
+          border: 1px solid var(--border);
+          border-radius: var(--radius);
+          background: var(--surface);
+          color: var(--text);
+          padding: 12px;
+          text-align: left;
+          cursor: pointer;
+          transition: border-color 0.18s ease, background 0.18s ease;
+        }
+        .file-tab:hover,
+        .file-tab.is-active {
+          border-color: var(--accent);
+          background: #eef4ff;
+        }
+        .file-name,
+        .file-meta {
+          display: block;
+          min-width: 0;
+          overflow-wrap: anywhere;
+        }
+        .file-name {
+          font-weight: 750;
+        }
+        .file-meta {
+          margin-top: 4px;
+          color: var(--muted);
+          font-size: 0.84rem;
+        }
+        .reader {
+          min-width: 0;
+          background: var(--surface);
+          border: 1px solid var(--border);
+          border-radius: var(--radius);
+          box-shadow: var(--shadow);
+          overflow: hidden;
+        }
+        .text-panel[hidden] {
+          display: none;
+        }
+        .reader-header {
+          display: flex;
+          align-items: flex-start;
+          justify-content: space-between;
+          gap: 16px;
+          padding: clamp(14px, 2vw, 20px);
+          border-bottom: 1px solid var(--border);
+        }
+        .reader-title {
+          min-width: 0;
+        }
+        .reader-actions {
+          flex: 0 0 auto;
+          display: flex;
+          flex-wrap: wrap;
+          align-items: center;
+          justify-content: flex-end;
+          gap: 8px;
+          max-width: min(100%, 520px);
+        }
+        .load-status {
+          color: var(--muted);
+          font-size: 0.85rem;
+          font-weight: 650;
+          white-space: nowrap;
+        }
+        .reader-kicker {
+          margin: 0 0 5px;
+          color: var(--muted);
+          font-size: 0.78rem;
+          font-weight: 750;
+          letter-spacing: 0.08em;
+          text-transform: uppercase;
+          overflow-wrap: anywhere;
+        }
+        .reader h2 {
+          margin: 0;
+          font-size: 1.5rem;
+          line-height: 1.15;
+          letter-spacing: 0;
+          overflow-wrap: anywhere;
+        }
+        .text-preview {
+          margin: 0;
+          min-height: 58vh;
+          max-height: 72vh;
+          overflow: auto;
+          padding: clamp(14px, 2vw, 22px);
+          background: #fbfcfe;
+          color: #111827;
+          font: 0.92rem/1.65 var(--font-mono);
+          tab-size: 2;
+          white-space: pre-wrap;
+          overflow-wrap: anywhere;
+        }
+        .preview-message {
+          padding: clamp(24px, 5vw, 48px);
+          color: var(--muted);
+          background: #fbfcfe;
+        }
+        @media (max-width: 900px) {
+          .topbar {
+            display: grid;
+            align-items: start;
+          }
+          h1 {
+            font-size: 2.6rem;
+          }
+          .actions {
+            justify-content: flex-start;
+          }
+          .reader-layout {
+            grid-template-columns: 1fr;
+          }
+          .file-list {
+            display: flex;
+            overflow-x: auto;
+            padding-bottom: 3px;
+            scroll-snap-type: x mandatory;
+          }
+          .file-tab {
+            flex: 0 0 min(280px, 84vw);
+            scroll-snap-align: start;
+          }
+          .text-preview {
+            min-height: 50vh;
+            max-height: none;
+          }
+        }
+        @media (max-width: 520px) {
+          main {
+            width: min(100% - 24px, 1280px);
+            padding: 20px 0 28px;
+          }
+          .actions a,
+          .raw-link,
+          .load-more {
+            width: 100%;
+          }
+          .reader-actions {
+            width: 100%;
+            justify-content: stretch;
+          }
+          .load-status {
+            width: 100%;
+            white-space: normal;
+          }
+          h1 {
+            font-size: 2rem;
+          }
+          .reader-header {
+            display: grid;
+          }
+        }
+      </style>
+    </head>
+    <body>
+      <main>
+        <header class="topbar">
+          <div>
+            <p class="eyebrow">AssetLink text batch</p>
+            <h1>Batch ${batchId}</h1>
+            <p class="batch-meta">${totalTexts} ${totalTexts === 1 ? "file" : "files"} · Created ${createdAt}</p>
+          </div>
+          <nav class="actions" aria-label="Batch actions">
+            <a href="${batchJsonUrl}" target="_blank" rel="noreferrer">View JSON</a>
+          </nav>
+        </header>
+        <section class="reader-layout" aria-label="Uploaded text files">
+          <nav class="file-list" aria-label="Choose a text file">
+            ${tabs}
+          </nav>
+          <div class="reader">
+            ${panels}
+          </div>
+        </section>
+      </main>
+      <script>
+        (() => {
+          const tabs = Array.from(document.querySelectorAll("[data-file-tab]"));
+          const panels = Array.from(document.querySelectorAll("[data-file-panel]"));
+          const loadMoreButtons = Array.from(document.querySelectorAll("[data-load-more]"));
+
+          const formatBytes = (value) => {
+            const bytes = Number(value || 0);
+
+            if (bytes < 1024) {
+              return bytes + " B";
+            }
+
+            if (bytes < 1024 * 1024) {
+              return (bytes / 1024).toFixed(1) + " KB";
+            }
+
+            return (bytes / (1024 * 1024)).toFixed(1) + " MB";
+          };
+
+          const setLoadState = (button, loaded, size, hasMore) => {
+            const panel = button.closest("[data-file-panel]");
+            const status = panel?.querySelector("[data-load-status]");
+
+            if (status) {
+              status.textContent = "Loaded " + formatBytes(loaded) + " of " + formatBytes(size);
+            }
+
+            button.dataset.nextOffset = String(loaded);
+            button.disabled = !hasMore;
+            button.textContent = hasMore ? "Load more" : "Fully loaded";
+          };
+
+          const activate = (index) => {
+            tabs.forEach((tab, tabIndex) => {
+              const isActive = tabIndex === index;
+              tab.classList.toggle("is-active", isActive);
+              tab.setAttribute("aria-selected", isActive ? "true" : "false");
+            });
+
+            panels.forEach((panel, panelIndex) => {
+              panel.hidden = panelIndex !== index;
+            });
+          };
+
+          loadMoreButtons.forEach((button) => {
+            button.addEventListener("click", async () => {
+              if (button.disabled) {
+                return;
+              }
+
+              const panel = button.closest("[data-file-panel]");
+              const content = panel?.querySelector("[data-text-content]");
+              const chunkUrl = button.dataset.chunkUrl;
+              const nextOffset = Number(button.dataset.nextOffset || 0);
+              const limit = Number(button.dataset.limit || ${TEXT_CHUNK_BYTES});
+
+              if (!content || !chunkUrl || Number.isNaN(nextOffset)) {
+                return;
+              }
+
+              button.disabled = true;
+              button.textContent = "Loading...";
+
+              try {
+                const response = await fetch(chunkUrl + "?offset=" + encodeURIComponent(nextOffset) + "&limit=" + encodeURIComponent(limit));
+                const payload = await response.json();
+
+                if (!response.ok) {
+                  throw new Error(payload.error || "Could not load more text.");
+                }
+
+                content.textContent += payload.content || "";
+                setLoadState(button, payload.nextOffset, payload.size, payload.hasMore);
+              } catch (error) {
+                button.disabled = false;
+                button.textContent = "Try again";
+
+                const status = panel?.querySelector("[data-load-status]");
+                if (status) {
+                  status.textContent = error.message || "Could not load more text.";
+                }
+              }
+            });
+          });
+
+          tabs.forEach((tab, index) => {
+            tab.addEventListener("click", () => activate(index));
+            tab.addEventListener("keydown", (event) => {
+              if (event.key !== "ArrowRight" && event.key !== "ArrowLeft") {
+                return;
+              }
+
+              event.preventDefault();
+              const delta = event.key === "ArrowRight" ? 1 : -1;
+              const nextIndex = (index + delta + tabs.length) % tabs.length;
+              tabs[nextIndex].focus();
+              activate(nextIndex);
+            });
+          });
+        })();
+      </script>
+    </body>
+  </html>`;
+}
+
+async function buildBatchHtml(manifest) {
+  const assets = normalizeManifestAssets(manifest);
+  const imageAssets = assets.filter((asset) => asset.type === "image");
+  const textAssets = assets.filter((asset) => asset.type === "text");
+
+  if (textAssets.length > 0 && imageAssets.length === 0) {
+    return buildTextBatchHtml(manifest, textAssets);
+  }
+
+  return buildImageBatchHtml({
+    ...manifest,
+    images: imageAssets
+  });
+}
+
+function buildImageBatchHtml(manifest) {
   const totalImages = manifest.images.length;
   const batchId = escapeHtml(manifest.batchId);
   const batchUrl = buildBatchUrl(manifest.batchId);
@@ -240,7 +881,7 @@ function buildBatchHtml(manifest) {
           font-weight: 600;
           color: var(--text-primary);
           margin-bottom: 12px;
-          letter-spacing: -0.5px;
+          letter-spacing: 0;
           line-height: 1.05;
           overflow-wrap: anywhere;
           word-break: break-word;
@@ -952,8 +1593,12 @@ app.get("/", (req, res) => {
   res.json({
     service: "AssetLink",
     uploadEndpoint: "POST /upload",
+    textUploadEndpoint: "POST /upload-text",
+    textChunkEndpoint: "GET /uploads/:batchId/text/:assetIndex?offset=<bytes>&limit=<bytes>",
     auth: "Authorization: Bearer <API_TOKEN>",
-    uploadResult: "Each upload returns a batch-specific link at /uploads/:batchId"
+    uploadResult: "Each upload returns a batch-specific link at /uploads/:batchId",
+    imageField: "images",
+    textField: "texts"
   });
 });
 
@@ -1014,8 +1659,10 @@ app.post("/upload", requireToken, async (req, res, next) => {
         })
           .then(() => {
             uploaded[currentImageIndex] = {
+              type: "image",
               originalName,
               objectKey,
+              mimeType,
               url: buildAssetUrl(objectKey)
             };
           })
@@ -1074,6 +1721,126 @@ app.post("/upload", requireToken, async (req, res, next) => {
   }
 });
 
+app.post("/upload-text", requireToken, async (req, res, next) => {
+  let parser;
+
+  try {
+    parser = busboy({
+      headers: req.headers
+    });
+  } catch (error) {
+    return res.status(400).json({
+      error: "Request must be multipart/form-data"
+    });
+  }
+
+  try {
+    const result = await new Promise((resolve, reject) => {
+      const batchId = crypto.randomUUID();
+      const uploaded = [];
+      const uploadTasks = [];
+      let fileCount = 0;
+      let textIndex = 0;
+      let failed = false;
+
+      const fail = (error) => {
+        if (failed) {
+          return;
+        }
+        failed = true;
+        reject(error);
+      };
+
+      parser.on("file", (fieldName, fileStream, info) => {
+        const originalName = info.filename || "upload.txt";
+        const mimeType = info.mimeType || "application/octet-stream";
+        const detectedMimeType = mime.lookup(originalName) || mimeType;
+
+        if (!TEXT_UPLOAD_FIELDS.has(fieldName)) {
+          fileStream.resume();
+          return;
+        }
+
+        if (!isSupportedTextFile(originalName, mimeType)) {
+          fileStream.resume();
+          fail(new Error(`Unsupported text file type for ${originalName}`));
+          return;
+        }
+
+        fileCount += 1;
+        const currentTextIndex = textIndex;
+        textIndex += 1;
+
+        const objectKey = safeObjectName(originalName);
+        const uploadTask = uploadObjectStream({
+          objectName: objectKey,
+          stream: fileStream,
+          contentType: "text/plain; charset=utf-8"
+        })
+          .then(() => {
+            uploaded[currentTextIndex] = {
+              type: "text",
+              originalName,
+              objectKey,
+              mimeType: detectedMimeType,
+              url: buildAssetUrl(objectKey)
+            };
+          })
+          .catch(fail);
+
+        fileStream.on("error", fail);
+        uploadTasks.push(uploadTask);
+      });
+
+      parser.on("error", fail);
+
+      parser.on("close", async () => {
+        if (failed) {
+          return;
+        }
+
+        try {
+          await Promise.all(uploadTasks);
+
+          if (fileCount === 0) {
+            return reject(new Error("At least one text file is required in the texts field"));
+          }
+
+          await saveBatchManifest(batchId, uploaded);
+
+          resolve({
+            message: "Text files uploaded successfully",
+            batchId,
+            batchUrl: buildBatchUrl(batchId),
+            batchJsonUrl: `${buildBatchUrl(batchId)}/json`,
+            texts: uploaded
+          });
+        } catch (error) {
+          fail(error);
+        }
+      });
+
+      req.pipe(parser);
+    });
+
+    return res.status(201).json(result);
+  } catch (error) {
+    if (error.message === "At least one text file is required in the texts field") {
+      return res.status(400).json({
+        error: error.message
+      });
+    }
+
+    if (error.message.startsWith("Unsupported text file type for ")) {
+      return res.status(400).json({
+        error: error.message
+      });
+    }
+
+    return next(error);
+  }
+});
+
 app.get("/assets/:objectKey", async (req, res, next) => {
   try {
     const objectKey = req.params.objectKey;
@@ -1081,11 +1848,12 @@ app.get("/assets/:objectKey", async (req, res, next) => {
     const stream = await getObjectStream(objectKey);
 
     res.setHeader("Content-Type", meta.metaData["content-type"] || mime.lookup(objectKey) || "application/octet-stream");
+    res.setHeader("X-Content-Type-Options", "nosniff");
     stream.pipe(res);
   } catch (error) {
     if (error.code === "NotFound" || error.code === "NoSuchKey") {
       return res.status(404).json({
-        error: "Image not found"
+        error: "Asset not found"
       });
     }
     return next(error);
@@ -1096,9 +1864,9 @@ app.get("/images", async (req, res, next) => {
   try {
     const objects = await listObjects();
     return res.json({
-      total: objects.filter((item) => !item.name.startsWith("uploads/")).length,
+      total: objects.filter((item) => !item.name.startsWith("uploads/") && !TEXT_EXTENSIONS.has(path.extname(item.name).toLowerCase())).length,
       images: objects
-        .filter((item) => !item.name.startsWith("uploads/"))
+        .filter((item) => !item.name.startsWith("uploads/") && !TEXT_EXTENSIONS.has(path.extname(item.name).toLowerCase()))
         .map((item) => ({
         objectKey: item.name,
         size: item.size,
@@ -1107,6 +1875,51 @@ app.get("/images", async (req, res, next) => {
         }))
     });
   } catch (error) {
+    return next(error);
+  }
+});
+
+app.get("/uploads/:batchId/text/:assetIndex", async (req, res, next) => {
+  try {
+    const manifest = await getBatchManifest(req.params.batchId);
+    const textAssets = normalizeManifestAssets(manifest).filter((asset) => asset.type === "text");
+    const assetIndex = Number(req.params.assetIndex);
+
+    if (!Number.isSafeInteger(assetIndex) || assetIndex < 0 || assetIndex >= textAssets.length) {
+      return res.status(404).json({
+        error: "Text asset not found"
+      });
+    }
+
+    const asset = textAssets[assetIndex];
+    const meta = await statObject(asset.objectKey);
+    const size = Number(meta.size || 0);
+    const offset = Math.min(parseNonNegativeInteger(req.query.offset, 0), size);
+    const limit = clampChunkLimit(req.query.limit);
+    const length = Math.min(limit, size - offset);
+    const buffer = length > 0
+      ? await getObjectRangeBuffer(asset.objectKey, offset, length)
+      : Buffer.alloc(0);
+    const nextOffset = offset + buffer.length;
+
+    return res.json({
+      batchId: manifest.batchId,
+      assetIndex,
+      originalName: asset.originalName,
+      mimeType: asset.mimeType || mime.lookup(asset.objectKey) || "text/plain",
+      offset,
+      nextOffset,
+      limit,
+      size,
+      hasMore: nextOffset < size,
+      content: buffer.toString("utf8")
+    });
+  } catch (error) {
+    if (error.code === "NotFound" || error.code === "NoSuchKey" || error.name === "S3Error") {
+      return res.status(404).json({
+        error: "Upload batch or text asset not found"
+      });
+    }
     return next(error);
   }
 });
@@ -1131,7 +1944,7 @@ app.get("/uploads/:batchId/json", async (req, res, next) => {
 app.get("/uploads/:batchId", async (req, res, next) => {
   try {
     const manifest = await getBatchManifest(req.params.batchId);
-    const html = buildBatchHtml(manifest);
+    const html = await buildBatchHtml(manifest);
     return res.type("html").send(html);
   } catch (error) {
     if (error.code === "NotFound" || error.code === "NoSuchKey" || error.name === "S3Error") {
