@@ -987,10 +987,12 @@ async function buildTextBatchHtml(manifest, textAssets) {
           --primary-hover: #242936;
           --blue: #2563eb;
           --blue-soft: #edf4ff;
+          --blue-border: #bfd8ff;
           --green: #10a37f;
-          --green-soft: #effaf6;
+          --green-soft: #ecfbf6;
+          --green-border: #b8eadb;
           --system-soft: #f5f0ff;
-          --user-bubble: #f2f3f5;
+          --user-bubble: #edf4ff;
           --font: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
           --font-mono: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
         }
@@ -1332,13 +1334,14 @@ async function buildTextBatchHtml(manifest, textAssets) {
         }
         .message--prompt .message-label {
           justify-self: end;
-          color: #315b9f;
+          color: #1d4ed8;
         }
         .message--prompt .message-body {
-          border: 1px solid #d8dce3;
+          border: 1px solid var(--blue-border);
           border-radius: 18px 18px 5px 18px;
           background: var(--user-bubble);
           padding: 10px 14px;
+          box-shadow: inset -3px 0 0 rgba(37, 99, 235, 0.55);
         }
         .message--response {
           max-inline-size: min(72ch, 100%);
@@ -1364,6 +1367,13 @@ async function buildTextBatchHtml(manifest, textAssets) {
         }
         .message--response .message-label {
           color: #157256;
+        }
+        .message--response .message-body {
+          border: 1px solid var(--green-border);
+          border-radius: 14px 18px 18px 5px;
+          background: var(--green-soft);
+          padding: 10px 14px;
+          box-shadow: inset 3px 0 0 rgba(16, 163, 127, 0.55);
         }
         .message--system {
           max-inline-size: min(64ch, 100%);
