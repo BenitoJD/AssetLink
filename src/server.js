@@ -985,14 +985,14 @@ async function buildTextBatchHtml(manifest, textAssets) {
           --line-strong: #cecec8;
           --primary: #111827;
           --primary-hover: #242936;
-          --blue: #2563eb;
-          --blue-soft: #edf4ff;
-          --blue-border: #bfd8ff;
-          --green: #10a37f;
-          --green-soft: #ecfbf6;
-          --green-border: #b8eadb;
+          --blue: #ffffff;
+          --blue-soft: #1f6feb;
+          --blue-border: #1557bf;
+          --green: #064e3b;
+          --green-soft: #d8f8e8;
+          --green-border: #76d5a7;
           --system-soft: #f5f0ff;
-          --user-bubble: #edf4ff;
+          --user-bubble: #1f6feb;
           --font: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
           --font-mono: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
         }
@@ -1334,14 +1334,23 @@ async function buildTextBatchHtml(manifest, textAssets) {
         }
         .message--prompt .message-label {
           justify-self: end;
-          color: #1d4ed8;
+          color: #1557bf;
         }
         .message--prompt .message-body {
           border: 1px solid var(--blue-border);
           border-radius: 18px 18px 5px 18px;
           background: var(--user-bubble);
+          color: #ffffff;
           padding: 10px 14px;
-          box-shadow: inset -3px 0 0 rgba(37, 99, 235, 0.55);
+          box-shadow: 0 12px 26px rgba(31, 111, 235, 0.22);
+        }
+        .message--prompt .message-body a,
+        .message--prompt .message-body code {
+          color: #ffffff;
+        }
+        .message--prompt .message-body code {
+          border-color: rgba(255, 255, 255, 0.34);
+          background: rgba(255, 255, 255, 0.16);
         }
         .message--response {
           max-inline-size: min(72ch, 100%);
@@ -1359,21 +1368,24 @@ async function buildTextBatchHtml(manifest, textAssets) {
           display: grid;
           place-items: center;
           border-radius: 9px;
-          background: var(--primary);
+          background: var(--green);
           color: #ffffff;
           font-size: 0.68rem;
           font-weight: 820;
           letter-spacing: 0.02em;
         }
         .message--response .message-label {
-          color: #157256;
+          color: var(--green);
         }
         .message--response .message-body {
           border: 1px solid var(--green-border);
           border-radius: 14px 18px 18px 5px;
           background: var(--green-soft);
+          color: #073f31;
           padding: 10px 14px;
-          box-shadow: inset 3px 0 0 rgba(16, 163, 127, 0.55);
+          box-shadow:
+            inset 4px 0 0 var(--green),
+            0 10px 24px rgba(16, 163, 127, 0.12);
         }
         .message--system {
           max-inline-size: min(64ch, 100%);
