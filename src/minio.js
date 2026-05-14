@@ -1,4 +1,5 @@
 const { Client } = require("minio");
+const { Readable } = require("stream");
 const mime = require("mime-types");
 
 const config = require("./config");
@@ -52,9 +53,26 @@ async function uploadObject({ objectName, buffer, contentType }) {
 }
 
 async function uploadObjectStream({ objectName, stream, contentType }) {
-  await client.putObject(bucketName, objectName, stream, {
+  const headers = {
     "Content-Type": contentType || mime.lookup(objectName) || "application/octet-stream"
-  });
+  };
+  const iterator = stream[Symbol.asyncIterator]();
+  const first = await iterator.next();
+
+  if (first.done) {
+    await client.putObject(bucketName, objectName, Buffer.alloc(0), 0, headers);
+    return;
+  }
+
+  async function* replayStream() {
+    yield first.value;
+
+    for await (const chunk of { [Symbol.asyncIterator]: () => iterator }) {
+      yield chunk;
+    }
+  }
+
+  await client.putObject(bucketName, objectName, Readable.from(replayStream()), headers);
 }
 
 function getObjectStream(objectName) {

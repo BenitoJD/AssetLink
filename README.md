@@ -174,7 +174,11 @@ Text batches render in a reader UI:
 
 - One tab per uploaded text file.
 - The raw file can be opened from `Open raw file`.
+- `Copy loaded` copies the text that has been loaded into the browser so far.
 - Uploaded HTML is displayed as escaped text, not executed as HTML.
+- Prompt-style files are displayed like a transcript when lines begin with `System:`, `Prompt:`, `User:`, `Assistant:`, `Codex:`, or `Response:`.
+- Lightweight readable formatting is supported inside the viewer: `**bold**`, `__bold__`, inline backtick code, and clickable `http://` or `https://` links.
+- Empty text files are accepted and show an empty-state message in the viewer.
 - Long files load in chunks so the browser does not need to render the full file at once.
 
 ## Long Text Files

@@ -300,9 +300,15 @@ async function buildTextBatchHtml(manifest, textAssets) {
       const rawUrl = buildAssetUrl(item.objectKey);
       const safeChunkUrl = `/uploads/${encodeURIComponent(manifest.batchId)}/text/${index}`;
       const loadedLabel = `Loaded ${formatBytes(item.nextOffset || 0)} of ${formatBytes(item.size || 0)}`;
+      const progressValue = item.size > 0
+        ? Math.min(100, Math.round(((item.nextOffset || 0) / item.size) * 100))
+        : 100;
       const preview = item.previewError
         ? `<div class="preview-message">${escapeHtml(item.previewError)}</div>`
-        : `<pre class="text-preview" tabindex="0"><code data-text-content>${escapeTextHtml(item.content)}</code></pre>`;
+        : `
+          <textarea class="raw-buffer" data-text-content aria-hidden="true">${escapeTextHtml(item.content)}</textarea>
+          <div class="chat-stream" data-chat-stream tabindex="0" aria-label="Readable text transcript"></div>
+        `;
       const loadMoreButton = item.previewError ? "" : `
               <button
                 type="button"
@@ -315,6 +321,7 @@ async function buildTextBatchHtml(manifest, textAssets) {
                 ${item.hasMore ? "" : "disabled"}
               >${item.hasMore ? "Load more" : "Fully loaded"}</button>
       `;
+      const copyButton = item.previewError ? "" : `<button type="button" class="ghost-button" data-copy-text>Copy loaded</button>`;
 
       return `
         <section class="text-panel" data-file-panel ${index === 0 ? "" : "hidden"}>
@@ -325,10 +332,12 @@ async function buildTextBatchHtml(manifest, textAssets) {
             </div>
             <div class="reader-actions">
               <span class="load-status" data-load-status>${escapeHtml(loadedLabel)}</span>
+              ${copyButton}
               ${loadMoreButton}
               <a href="${rawUrl}" target="_blank" rel="noreferrer" class="raw-link">Open raw file</a>
             </div>
           </div>
+          <div class="progress-track" aria-hidden="true"><span data-progress-bar style="width: ${progressValue}%"></span></div>
           ${preview}
         </section>
       `;
@@ -344,15 +353,23 @@ async function buildTextBatchHtml(manifest, textAssets) {
       <style>
         :root {
           color-scheme: light;
-          --bg: #f6f7f9;
+          --bg: #f4f5f7;
           --surface: #ffffff;
-          --surface-muted: #eef2f6;
-          --text: #151923;
-          --muted: #697386;
-          --accent: #2563eb;
-          --accent-strong: #1d4ed8;
-          --border: #d8dee8;
-          --shadow: 0 18px 45px rgba(21, 25, 35, 0.08);
+          --surface-soft: #fafafa;
+          --surface-muted: #edf0f4;
+          --text: #17191f;
+          --muted: #667085;
+          --muted-strong: #475467;
+          --accent: #2f6fed;
+          --accent-strong: #1d56c5;
+          --accent-soft: #eaf1ff;
+          --prompt: #fff9ec;
+          --response: #f6fbf8;
+          --system: #f7f0ff;
+          --note: #ffffff;
+          --border: #d6dae2;
+          --border-strong: #bac2cf;
+          --shadow: 0 18px 48px rgba(23, 25, 31, 0.10);
           --radius: 8px;
           --font: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
           --font-mono: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
@@ -364,41 +381,42 @@ async function buildTextBatchHtml(manifest, textAssets) {
           margin: 0;
           min-height: 100vh;
           min-height: 100dvh;
-          background: var(--bg);
+          background:
+            linear-gradient(180deg, #ffffff 0, var(--bg) 280px),
+            var(--bg);
           color: var(--text);
           font-family: var(--font);
           line-height: 1.5;
         }
         main {
-          width: min(1280px, calc(100% - 32px));
+          width: min(1420px, calc(100% - 32px));
           margin: 0 auto;
-          padding: clamp(22px, 4vw, 44px) 0;
+          padding: clamp(18px, 3vw, 34px) 0 34px;
         }
         .topbar {
           display: flex;
           justify-content: space-between;
-          align-items: flex-end;
+          align-items: center;
           gap: 18px;
-          padding-bottom: 18px;
-          border-bottom: 1px solid var(--border);
+          padding: 12px 0 18px;
         }
         .eyebrow {
-          margin: 0 0 8px;
+          margin: 0 0 6px;
           color: var(--accent);
           font-size: 0.78rem;
           font-weight: 750;
-          letter-spacing: 0.12em;
+          letter-spacing: 0.10em;
           text-transform: uppercase;
         }
         h1 {
           margin: 0;
-          font-size: 3.6rem;
-          line-height: 1;
+          font-size: clamp(2rem, 3vw, 3rem);
+          line-height: 1.05;
           letter-spacing: 0;
           overflow-wrap: anywhere;
         }
         .batch-meta {
-          margin: 10px 0 0;
+          margin: 8px 0 0;
           color: var(--muted);
           overflow-wrap: anywhere;
         }
@@ -410,9 +428,10 @@ async function buildTextBatchHtml(manifest, textAssets) {
         }
         .actions a,
         .raw-link,
-        .load-more {
+        .load-more,
+        .ghost-button {
           appearance: none;
-          min-height: 42px;
+          min-height: 38px;
           display: inline-flex;
           align-items: center;
           justify-content: center;
@@ -420,12 +439,19 @@ async function buildTextBatchHtml(manifest, textAssets) {
           border-radius: var(--radius);
           background: var(--surface);
           color: var(--accent-strong);
-          padding: 0 13px;
+          padding: 0 12px;
           text-decoration: none;
-          font-weight: 700;
-          box-shadow: 0 8px 24px rgba(21, 25, 35, 0.06);
+          font-size: 0.9rem;
+          font-weight: 720;
           cursor: pointer;
           font: inherit;
+          transition: background 0.16s ease, border-color 0.16s ease, color 0.16s ease;
+        }
+        .actions a:hover,
+        .raw-link:hover,
+        .ghost-button:hover {
+          background: var(--accent-soft);
+          border-color: #b8cdfc;
         }
         .load-more {
           background: var(--accent);
@@ -440,13 +466,15 @@ async function buildTextBatchHtml(manifest, textAssets) {
           box-shadow: none;
         }
         .reader-layout {
-          margin-top: 22px;
+          margin-top: 4px;
           display: grid;
-          grid-template-columns: minmax(230px, 300px) minmax(0, 1fr);
-          gap: 18px;
+          grid-template-columns: minmax(240px, 310px) minmax(0, 1fr);
+          gap: 16px;
           align-items: start;
         }
         .file-list {
+          position: sticky;
+          top: 14px;
           display: grid;
           gap: 8px;
         }
@@ -466,6 +494,7 @@ async function buildTextBatchHtml(manifest, textAssets) {
         .file-tab.is-active {
           border-color: var(--accent);
           background: #eef4ff;
+          box-shadow: inset 3px 0 0 var(--accent);
         }
         .file-name,
         .file-meta {
@@ -499,6 +528,7 @@ async function buildTextBatchHtml(manifest, textAssets) {
           gap: 16px;
           padding: clamp(14px, 2vw, 20px);
           border-bottom: 1px solid var(--border);
+          background: rgba(255, 255, 255, 0.92);
         }
         .reader-title {
           min-width: 0;
@@ -510,7 +540,7 @@ async function buildTextBatchHtml(manifest, textAssets) {
           align-items: center;
           justify-content: flex-end;
           gap: 8px;
-          max-width: min(100%, 520px);
+          max-width: min(100%, 650px);
         }
         .load-status {
           color: var(--muted);
@@ -529,23 +559,100 @@ async function buildTextBatchHtml(manifest, textAssets) {
         }
         .reader h2 {
           margin: 0;
-          font-size: 1.5rem;
-          line-height: 1.15;
+          font-size: clamp(1.2rem, 2vw, 1.6rem);
+          line-height: 1.18;
           letter-spacing: 0;
           overflow-wrap: anywhere;
         }
-        .text-preview {
-          margin: 0;
+        .progress-track {
+          height: 4px;
+          background: var(--surface-muted);
+          overflow: hidden;
+        }
+        .progress-track span {
+          display: block;
+          height: 100%;
+          width: 0;
+          background: linear-gradient(90deg, var(--accent), #27a971);
+          transition: width 0.22s ease;
+        }
+        .raw-buffer {
+          display: none;
+        }
+        .chat-stream {
           min-height: 58vh;
           max-height: 72vh;
           overflow: auto;
-          padding: clamp(14px, 2vw, 22px);
-          background: #fbfcfe;
+          padding: clamp(16px, 3vw, 32px);
+          background:
+            linear-gradient(180deg, #fbfcfd 0, #f6f7f9 100%);
+          scroll-behavior: smooth;
+        }
+        .message {
+          display: grid;
+          gap: 8px;
+          max-inline-size: 78ch;
+          margin: 0 auto 14px;
+          padding: clamp(14px, 2vw, 20px);
+          border: 1px solid var(--border);
+          border-radius: var(--radius);
+          background: var(--note);
+          box-shadow: 0 8px 22px rgba(23, 25, 31, 0.045);
+        }
+        .message:last-child {
+          margin-bottom: 0;
+        }
+        .message--prompt {
+          background: var(--prompt);
+          border-color: #ead6a3;
+        }
+        .message--response {
+          background: var(--response);
+          border-color: #c9e5d4;
+        }
+        .message--system {
+          background: var(--system);
+          border-color: #d8c5f5;
+        }
+        .message-label {
+          color: var(--muted-strong);
+          font-size: 0.76rem;
+          font-weight: 800;
+          letter-spacing: 0.08em;
+          text-transform: uppercase;
+        }
+        .message-body {
           color: #111827;
-          font: 0.92rem/1.65 var(--font-mono);
-          tab-size: 2;
+          font-size: 1rem;
+          line-height: 1.72;
           white-space: pre-wrap;
           overflow-wrap: anywhere;
+        }
+        .message-body strong {
+          font-weight: 800;
+        }
+        .message-body code {
+          padding: 0.1em 0.32em;
+          border: 1px solid var(--border);
+          border-radius: 5px;
+          background: rgba(255, 255, 255, 0.78);
+          color: #0f172a;
+          font-family: var(--font-mono);
+          font-size: 0.92em;
+        }
+        .message-body a {
+          color: var(--accent-strong);
+          font-weight: 650;
+        }
+        .empty-state {
+          max-inline-size: 58ch;
+          margin: 0 auto;
+          padding: clamp(28px, 6vw, 56px);
+          border: 1px dashed var(--border-strong);
+          border-radius: var(--radius);
+          background: rgba(255, 255, 255, 0.72);
+          color: var(--muted);
+          text-align: center;
         }
         .preview-message {
           padding: clamp(24px, 5vw, 48px);
@@ -567,6 +674,7 @@ async function buildTextBatchHtml(manifest, textAssets) {
             grid-template-columns: 1fr;
           }
           .file-list {
+            position: static;
             display: flex;
             overflow-x: auto;
             padding-bottom: 3px;
@@ -576,7 +684,7 @@ async function buildTextBatchHtml(manifest, textAssets) {
             flex: 0 0 min(280px, 84vw);
             scroll-snap-align: start;
           }
-          .text-preview {
+          .chat-stream {
             min-height: 50vh;
             max-height: none;
           }
@@ -588,7 +696,8 @@ async function buildTextBatchHtml(manifest, textAssets) {
           }
           .actions a,
           .raw-link,
-          .load-more {
+          .load-more,
+          .ghost-button {
             width: 100%;
           }
           .reader-actions {
@@ -634,6 +743,138 @@ async function buildTextBatchHtml(manifest, textAssets) {
           const tabs = Array.from(document.querySelectorAll("[data-file-tab]"));
           const panels = Array.from(document.querySelectorAll("[data-file-panel]"));
           const loadMoreButtons = Array.from(document.querySelectorAll("[data-load-more]"));
+          const copyButtons = Array.from(document.querySelectorAll("[data-copy-text]"));
+
+          const escapeInline = (value) => String(value)
+            .replace(/&/g, "&amp;")
+            .replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;")
+            .replace(/"/g, "&quot;")
+            .replace(/'/g, "&#039;");
+
+          const renderInline = (value) => {
+            let safe = escapeInline(value);
+            safe = safe.replace(/\`([^\`]+)\`/g, "<code>$1</code>");
+            safe = safe.replace(/\\*\\*([^*]+)\\*\\*/g, "<strong>$1</strong>");
+            safe = safe.replace(/__([^_]+)__/g, "<strong>$1</strong>");
+            safe = safe.replace(/(^|\\s)(https?:\\/\\/[^\\s<]+)/g, '$1<a href="$2" target="_blank" rel="noreferrer">$2</a>');
+
+            return safe;
+          };
+
+          const roleFromBlock = (block) => {
+            const match = block.match(/^\\s*(system|developer|user|human|prompt|assistant|codex|response)\\s*[:\\-]\\s*/i);
+
+            if (!match) {
+              return { label: "Text", tone: "note", text: block };
+            }
+
+            const rawRole = match[1].toLowerCase();
+            const text = block.slice(match[0].length);
+
+            if (rawRole === "assistant" || rawRole === "codex" || rawRole === "response") {
+              return { label: "Response", tone: "response", text };
+            }
+
+            if (rawRole === "system" || rawRole === "developer") {
+              return { label: "System", tone: "system", text };
+            }
+
+            return { label: "Prompt", tone: "prompt", text };
+          };
+
+          const splitIntoBlocks = (text) => {
+            const normalized = String(text || "").replace(/\\r\\n/g, "\\n");
+            const roleLinePattern = /^\\s*(system|developer|user|human|prompt|assistant|codex|response)\\s*[:\\-]\\s*/i;
+            const blocks = [];
+            let current = [];
+
+            normalized.split("\\n").forEach((line) => {
+              const trimmed = line.trim();
+
+              if (!trimmed) {
+                if (current.length) {
+                  blocks.push(current.join("\\n").trim());
+                  current = [];
+                }
+                return;
+              }
+
+              if (roleLinePattern.test(line) && current.length) {
+                blocks.push(current.join("\\n").trim());
+                current = [line];
+                return;
+              }
+
+              current.push(line);
+            });
+
+            if (current.length) {
+              blocks.push(current.join("\\n").trim());
+            }
+
+            if (blocks.length === 0) {
+              return [];
+            }
+
+            return blocks.flatMap((block) => {
+              const lines = block.split("\\n");
+
+              if (lines.length <= 18) {
+                return [block];
+              }
+
+              const groups = [];
+              for (let index = 0; index < lines.length; index += 14) {
+                groups.push(lines.slice(index, index + 14).join("\\n"));
+              }
+
+              return groups;
+            });
+          };
+
+          const appendChatContent = (panel, text) => {
+            const stream = panel?.querySelector("[data-chat-stream]");
+
+            if (!stream) {
+              return;
+            }
+
+            const existingEmptyState = stream.querySelector(".empty-state");
+            if (existingEmptyState) {
+              existingEmptyState.remove();
+            }
+
+            const blocks = splitIntoBlocks(text);
+
+            if (blocks.length === 0 && !stream.children.length) {
+              const empty = document.createElement("div");
+              empty.className = "empty-state";
+              empty.textContent = "This text file is empty.";
+              stream.appendChild(empty);
+              return;
+            }
+
+            const fragment = document.createDocumentFragment();
+            blocks.forEach((block) => {
+              const role = roleFromBlock(block);
+              const message = document.createElement("article");
+              message.className = "message message--" + role.tone;
+
+              const label = document.createElement("div");
+              label.className = "message-label";
+              label.textContent = role.label;
+
+              const body = document.createElement("div");
+              body.className = "message-body";
+              body.innerHTML = renderInline(role.text);
+
+              message.append(label, body);
+              fragment.appendChild(message);
+            });
+
+            stream.appendChild(fragment);
+          };
 
           const formatBytes = (value) => {
             const bytes = Number(value || 0);
@@ -652,9 +893,15 @@ async function buildTextBatchHtml(manifest, textAssets) {
           const setLoadState = (button, loaded, size, hasMore) => {
             const panel = button.closest("[data-file-panel]");
             const status = panel?.querySelector("[data-load-status]");
+            const progress = panel?.querySelector("[data-progress-bar]");
 
             if (status) {
               status.textContent = "Loaded " + formatBytes(loaded) + " of " + formatBytes(size);
+            }
+
+            if (progress) {
+              const percent = size > 0 ? Math.min(100, Math.round((loaded / size) * 100)) : 100;
+              progress.style.width = percent + "%";
             }
 
             button.dataset.nextOffset = String(loaded);
@@ -701,7 +948,9 @@ async function buildTextBatchHtml(manifest, textAssets) {
                   throw new Error(payload.error || "Could not load more text.");
                 }
 
-                content.textContent += payload.content || "";
+                const chunk = payload.content || "";
+                content.value += chunk;
+                appendChatContent(panel, chunk);
                 setLoadState(button, payload.nextOffset, payload.size, payload.hasMore);
               } catch (error) {
                 button.disabled = false;
@@ -711,6 +960,32 @@ async function buildTextBatchHtml(manifest, textAssets) {
                 if (status) {
                   status.textContent = error.message || "Could not load more text.";
                 }
+              }
+            });
+          });
+
+          copyButtons.forEach((button) => {
+            button.addEventListener("click", async () => {
+              const panel = button.closest("[data-file-panel]");
+              const content = panel?.querySelector("[data-text-content]");
+              const text = content?.value || "";
+
+              if (!navigator.clipboard || !content) {
+                return;
+              }
+
+              const previous = button.textContent;
+              try {
+                await navigator.clipboard.writeText(text);
+                button.textContent = "Copied";
+                window.setTimeout(() => {
+                  button.textContent = previous;
+                }, 1400);
+              } catch (error) {
+                button.textContent = "Copy failed";
+                window.setTimeout(() => {
+                  button.textContent = previous;
+                }, 1400);
               }
             });
           });
@@ -728,6 +1003,13 @@ async function buildTextBatchHtml(manifest, textAssets) {
               tabs[nextIndex].focus();
               activate(nextIndex);
             });
+          });
+
+          panels.forEach((panel) => {
+            const content = panel.querySelector("[data-text-content]");
+            if (content) {
+              appendChatContent(panel, content.value);
+            }
           });
         })();
       </script>
