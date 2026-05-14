@@ -173,8 +173,11 @@ http://localhost:3000/uploads/<batchId>
 Text batches render in a reader UI:
 
 - One tab per uploaded text file.
-- The raw file can be opened from `Open raw file`.
+- The raw file can be opened from `Raw`.
 - `Copy loaded` copies the text that has been loaded into the browser so far.
+- Reader modes are available for `Transcript`, `Document`, and `Raw` viewing.
+- `Search loaded text` highlights matches in the content already loaded into the browser.
+- `Auto-load` can fetch the next chunk when the reader is scrolled near the bottom.
 - Uploaded HTML is displayed as escaped text, not executed as HTML.
 - Prompt-style files are displayed like a transcript when lines begin with `System:`, `Prompt:`, `User:`, `Assistant:`, `Codex:`, or `Response:`.
 - Lightweight readable formatting is supported inside the viewer: `**bold**`, `__bold__`, inline backtick code, and clickable `http://` or `https://` links.

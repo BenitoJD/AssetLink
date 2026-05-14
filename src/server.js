@@ -282,12 +282,20 @@ async function buildTextBatchHtml(manifest, textAssets) {
     .map((item, index) => {
       const isActive = index === 0;
       const safeName = escapeHtml(item.originalName || "Uploaded text");
-      const size = item.size ? ` · ${escapeHtml(formatBytes(item.size))}` : "";
+      const size = item.size ? escapeHtml(formatBytes(item.size)) : "0 B";
+      const loaded = escapeHtml(formatBytes(item.nextOffset || 0));
+      const progressValue = item.size > 0
+        ? Math.min(100, Math.round(((item.nextOffset || 0) / item.size) * 100))
+        : 100;
 
       return `
         <button type="button" class="file-tab${isActive ? " is-active" : ""}" data-file-tab data-target-index="${index}" aria-selected="${isActive ? "true" : "false"}">
-          <span class="file-name">${safeName}</span>
-          <span class="file-meta">Text ${index + 1} of ${totalTexts}${size}</span>
+          <span class="file-index">0${index + 1}</span>
+          <span class="file-copy">
+            <span class="file-name">${safeName}</span>
+            <span class="file-meta">${loaded} loaded · ${size}</span>
+          </span>
+          <span class="file-progress" aria-hidden="true"><span style="width: ${progressValue}%"></span></span>
         </button>
       `;
     })
@@ -312,7 +320,7 @@ async function buildTextBatchHtml(manifest, textAssets) {
       const loadMoreButton = item.previewError ? "" : `
               <button
                 type="button"
-                class="load-more"
+                class="button button-primary"
                 data-load-more
                 data-chunk-url="${safeChunkUrl}"
                 data-next-offset="${item.nextOffset || 0}"
@@ -321,24 +329,54 @@ async function buildTextBatchHtml(manifest, textAssets) {
                 ${item.hasMore ? "" : "disabled"}
               >${item.hasMore ? "Load more" : "Fully loaded"}</button>
       `;
-      const copyButton = item.previewError ? "" : `<button type="button" class="ghost-button" data-copy-text>Copy loaded</button>`;
+      const copyButton = item.previewError ? "" : `<button type="button" class="button" data-copy-text>Copy loaded</button>`;
+      const inspector = `
+        <dl class="inspector-list">
+          <div><dt>Type</dt><dd>${safeMimeType}</dd></div>
+          <div><dt>Loaded</dt><dd data-load-status>${escapeHtml(loadedLabel)}</dd></div>
+          <div><dt>Size</dt><dd>${escapeHtml(formatBytes(item.size || 0))}</dd></div>
+          <div><dt>Mode</dt><dd data-active-mode-label>Transcript</dd></div>
+        </dl>
+      `;
 
       return `
         <section class="text-panel" data-file-panel ${index === 0 ? "" : "hidden"}>
-          <div class="reader-header">
+          <header class="reader-header">
             <div class="reader-title">
               <p class="reader-kicker">${safeMimeType}</p>
               <h2>${safeName}</h2>
             </div>
             <div class="reader-actions">
-              <span class="load-status" data-load-status>${escapeHtml(loadedLabel)}</span>
               ${copyButton}
               ${loadMoreButton}
-              <a href="${rawUrl}" target="_blank" rel="noreferrer" class="raw-link">Open raw file</a>
+              <a href="${rawUrl}" target="_blank" rel="noreferrer" class="button">Raw</a>
             </div>
+          </header>
+          <div class="reader-toolbar" aria-label="Reader controls">
+            <div class="mode-switch" role="group" aria-label="Reader mode">
+              <button type="button" class="mode-button is-active" data-reader-mode="transcript">Transcript</button>
+              <button type="button" class="mode-button" data-reader-mode="document">Document</button>
+              <button type="button" class="mode-button" data-reader-mode="raw">Raw</button>
+            </div>
+            <label class="search-box">
+              <span>Search loaded text</span>
+              <input type="search" data-search-input autocomplete="off" placeholder="Find in loaded text" />
+            </label>
+            <span class="search-count" data-search-count>No search</span>
+            <label class="auto-load">
+              <input type="checkbox" data-auto-load />
+              <span>Auto-load</span>
+            </label>
           </div>
           <div class="progress-track" aria-hidden="true"><span data-progress-bar style="width: ${progressValue}%"></span></div>
-          ${preview}
+          <div class="reader-body">
+            <div class="reader-canvas">
+              ${preview}
+            </div>
+            <aside class="reader-inspector" aria-label="File details">
+              ${inspector}
+            </aside>
+          </div>
         </section>
       `;
     })
@@ -353,23 +391,27 @@ async function buildTextBatchHtml(manifest, textAssets) {
       <style>
         :root {
           color-scheme: light;
-          --bg: #f4f5f7;
+          --app-bg: #f3f4f6;
+          --rail-bg: #101318;
+          --rail-muted: #8f98a8;
           --surface: #ffffff;
-          --surface-soft: #fafafa;
+          --surface-alt: #f8f9fb;
+          --surface-strong: #eef1f5;
           --surface-muted: #edf0f4;
-          --text: #17191f;
-          --muted: #667085;
-          --muted-strong: #475467;
-          --accent: #2f6fed;
-          --accent-strong: #1d56c5;
-          --accent-soft: #eaf1ff;
-          --prompt: #fff9ec;
-          --response: #f6fbf8;
-          --system: #f7f0ff;
+          --text: #15171c;
+          --muted: #6c7482;
+          --muted-strong: #3f4652;
+          --accent: #0f6fff;
+          --accent-strong: #0759d1;
+          --accent-soft: #e8f1ff;
+          --success: #1f8a5b;
+          --prompt: #fff8e8;
+          --response: #f4faf7;
+          --system: #f6f0ff;
           --note: #ffffff;
-          --border: #d6dae2;
-          --border-strong: #bac2cf;
-          --shadow: 0 18px 48px rgba(23, 25, 31, 0.10);
+          --border: #d9dee7;
+          --border-strong: #b7c0cd;
+          --shadow: 0 24px 70px rgba(18, 23, 33, 0.12);
           --radius: 8px;
           --font: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
           --font-mono: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
@@ -382,23 +424,23 @@ async function buildTextBatchHtml(manifest, textAssets) {
           min-height: 100vh;
           min-height: 100dvh;
           background:
-            linear-gradient(180deg, #ffffff 0, var(--bg) 280px),
-            var(--bg);
+            linear-gradient(180deg, #ffffff 0, var(--app-bg) 280px),
+            var(--app-bg);
           color: var(--text);
           font-family: var(--font);
           line-height: 1.5;
         }
         main {
-          width: min(1420px, calc(100% - 32px));
+          width: min(1680px, calc(100% - 24px));
           margin: 0 auto;
-          padding: clamp(18px, 3vw, 34px) 0 34px;
+          padding: 14px 0 24px;
         }
         .topbar {
           display: flex;
           justify-content: space-between;
           align-items: center;
           gap: 18px;
-          padding: 12px 0 18px;
+          padding: 8px 4px 14px;
         }
         .eyebrow {
           margin: 0 0 6px;
@@ -410,8 +452,8 @@ async function buildTextBatchHtml(manifest, textAssets) {
         }
         h1 {
           margin: 0;
-          font-size: clamp(2rem, 3vw, 3rem);
-          line-height: 1.05;
+          font-size: clamp(1.55rem, 2vw, 2.15rem);
+          line-height: 1.08;
           letter-spacing: 0;
           overflow-wrap: anywhere;
         }
@@ -427,11 +469,9 @@ async function buildTextBatchHtml(manifest, textAssets) {
           justify-content: flex-end;
         }
         .actions a,
-        .raw-link,
-        .load-more,
-        .ghost-button {
+        .button {
           appearance: none;
-          min-height: 38px;
+          min-height: 36px;
           display: inline-flex;
           align-items: center;
           justify-content: center;
@@ -448,17 +488,20 @@ async function buildTextBatchHtml(manifest, textAssets) {
           transition: background 0.16s ease, border-color 0.16s ease, color 0.16s ease;
         }
         .actions a:hover,
-        .raw-link:hover,
-        .ghost-button:hover {
+        .button:hover {
           background: var(--accent-soft);
           border-color: #b8cdfc;
         }
-        .load-more {
+        .button-primary {
           background: var(--accent);
           border-color: var(--accent);
           color: #ffffff;
         }
-        .load-more:disabled {
+        .button-primary:hover {
+          background: var(--accent-strong);
+          border-color: var(--accent-strong);
+        }
+        .button:disabled {
           background: var(--surface-muted);
           border-color: var(--border);
           color: var(--muted);
@@ -468,33 +511,54 @@ async function buildTextBatchHtml(manifest, textAssets) {
         .reader-layout {
           margin-top: 4px;
           display: grid;
-          grid-template-columns: minmax(240px, 310px) minmax(0, 1fr);
-          gap: 16px;
-          align-items: start;
+          grid-template-columns: minmax(260px, 320px) minmax(0, 1fr);
+          min-height: calc(100dvh - 116px);
+          border: 1px solid #d3d9e4;
+          border-radius: 10px;
+          background: var(--surface);
+          box-shadow: var(--shadow);
+          overflow: hidden;
         }
         .file-list {
-          position: sticky;
-          top: 14px;
+          min-height: 100%;
           display: grid;
-          gap: 8px;
+          align-content: start;
+          gap: 6px;
+          padding: 12px;
+          background: var(--rail-bg);
+          border-right: 1px solid rgba(255, 255, 255, 0.08);
         }
         .file-tab {
           appearance: none;
           width: 100%;
-          border: 1px solid var(--border);
+          position: relative;
+          display: grid;
+          grid-template-columns: auto minmax(0, 1fr);
+          gap: 10px;
+          overflow: hidden;
+          border: 1px solid rgba(255, 255, 255, 0.08);
           border-radius: var(--radius);
-          background: var(--surface);
-          color: var(--text);
-          padding: 12px;
+          background: rgba(255, 255, 255, 0.035);
+          color: #f6f7fb;
+          padding: 12px 12px 14px;
           text-align: left;
           cursor: pointer;
-          transition: border-color 0.18s ease, background 0.18s ease;
+          transition: border-color 0.18s ease, background 0.18s ease, transform 0.18s ease;
         }
         .file-tab:hover,
         .file-tab.is-active {
-          border-color: var(--accent);
-          background: #eef4ff;
-          box-shadow: inset 3px 0 0 var(--accent);
+          border-color: rgba(255, 255, 255, 0.24);
+          background: rgba(255, 255, 255, 0.10);
+          transform: translateY(-1px);
+        }
+        .file-index {
+          color: var(--rail-muted);
+          font-family: var(--font-mono);
+          font-size: 0.76rem;
+          line-height: 1.35;
+        }
+        .file-copy {
+          min-width: 0;
         }
         .file-name,
         .file-meta {
@@ -507,15 +571,25 @@ async function buildTextBatchHtml(manifest, textAssets) {
         }
         .file-meta {
           margin-top: 4px;
-          color: var(--muted);
+          color: var(--rail-muted);
           font-size: 0.84rem;
+        }
+        .file-progress {
+          position: absolute;
+          left: 0;
+          right: 0;
+          bottom: 0;
+          height: 2px;
+          background: rgba(255, 255, 255, 0.08);
+        }
+        .file-progress span {
+          display: block;
+          height: 100%;
+          background: linear-gradient(90deg, var(--accent), #2dd4bf);
         }
         .reader {
           min-width: 0;
-          background: var(--surface);
-          border: 1px solid var(--border);
-          border-radius: var(--radius);
-          box-shadow: var(--shadow);
+          background: var(--surface-alt);
           overflow: hidden;
         }
         .text-panel[hidden] {
@@ -526,9 +600,9 @@ async function buildTextBatchHtml(manifest, textAssets) {
           align-items: flex-start;
           justify-content: space-between;
           gap: 16px;
-          padding: clamp(14px, 2vw, 20px);
+          padding: 18px 20px 14px;
           border-bottom: 1px solid var(--border);
-          background: rgba(255, 255, 255, 0.92);
+          background: rgba(255, 255, 255, 0.94);
         }
         .reader-title {
           min-width: 0;
@@ -542,12 +616,6 @@ async function buildTextBatchHtml(manifest, textAssets) {
           gap: 8px;
           max-width: min(100%, 650px);
         }
-        .load-status {
-          color: var(--muted);
-          font-size: 0.85rem;
-          font-weight: 650;
-          white-space: nowrap;
-        }
         .reader-kicker {
           margin: 0 0 5px;
           color: var(--muted);
@@ -559,10 +627,79 @@ async function buildTextBatchHtml(manifest, textAssets) {
         }
         .reader h2 {
           margin: 0;
-          font-size: clamp(1.2rem, 2vw, 1.6rem);
+          font-size: clamp(1.12rem, 1.7vw, 1.45rem);
           line-height: 1.18;
           letter-spacing: 0;
           overflow-wrap: anywhere;
+        }
+        .reader-toolbar {
+          display: grid;
+          grid-template-columns: auto minmax(180px, 1fr) auto auto;
+          gap: 10px;
+          align-items: center;
+          padding: 10px 20px;
+          border-bottom: 1px solid var(--border);
+          background: rgba(248, 249, 251, 0.94);
+        }
+        .mode-switch {
+          display: inline-flex;
+          padding: 3px;
+          border: 1px solid var(--border);
+          border-radius: var(--radius);
+          background: #ffffff;
+        }
+        .mode-button {
+          appearance: none;
+          min-height: 30px;
+          border: 0;
+          border-radius: 6px;
+          background: transparent;
+          color: var(--muted-strong);
+          padding: 0 10px;
+          font: inherit;
+          font-size: 0.84rem;
+          font-weight: 720;
+          cursor: pointer;
+        }
+        .mode-button.is-active {
+          background: #111827;
+          color: #ffffff;
+        }
+        .search-box {
+          display: grid;
+          grid-template-columns: auto minmax(0, 1fr);
+          gap: 8px;
+          align-items: center;
+          min-width: 0;
+          color: var(--muted);
+          font-size: 0.82rem;
+          font-weight: 700;
+        }
+        .search-box input {
+          width: 100%;
+          min-width: 0;
+          min-height: 34px;
+          border: 1px solid var(--border);
+          border-radius: var(--radius);
+          background: #ffffff;
+          color: var(--text);
+          font: inherit;
+          padding: 0 10px;
+        }
+        .search-count {
+          color: var(--muted);
+          font-size: 0.82rem;
+          font-weight: 700;
+          white-space: nowrap;
+        }
+        .auto-load {
+          display: inline-flex;
+          align-items: center;
+          gap: 7px;
+          color: var(--muted-strong);
+          font-size: 0.84rem;
+          font-weight: 720;
+          white-space: nowrap;
         }
         .progress-track {
           height: 4px;
@@ -573,29 +710,65 @@ async function buildTextBatchHtml(manifest, textAssets) {
           display: block;
           height: 100%;
           width: 0;
-          background: linear-gradient(90deg, var(--accent), #27a971);
+          background: linear-gradient(90deg, var(--accent), #2dd4bf);
           transition: width 0.22s ease;
         }
         .raw-buffer {
           display: none;
         }
+        .reader-body {
+          display: grid;
+          grid-template-columns: minmax(0, 1fr) minmax(220px, 280px);
+          min-height: calc(100dvh - 250px);
+        }
+        .reader-canvas {
+          min-width: 0;
+        }
+        .reader-inspector {
+          border-left: 1px solid var(--border);
+          background: #ffffff;
+          padding: 16px;
+        }
+        .inspector-list {
+          display: grid;
+          gap: 13px;
+          margin: 0;
+        }
+        .inspector-list div {
+          display: grid;
+          gap: 3px;
+        }
+        .inspector-list dt {
+          color: var(--muted);
+          font-size: 0.72rem;
+          font-weight: 800;
+          letter-spacing: 0.08em;
+          text-transform: uppercase;
+        }
+        .inspector-list dd {
+          margin: 0;
+          color: var(--text);
+          font-size: 0.9rem;
+          font-weight: 650;
+          overflow-wrap: anywhere;
+        }
         .chat-stream {
-          min-height: 58vh;
-          max-height: 72vh;
+          height: calc(100dvh - 250px);
+          min-height: 560px;
           overflow: auto;
-          padding: clamp(16px, 3vw, 32px);
-          background:
-            linear-gradient(180deg, #fbfcfd 0, #f6f7f9 100%);
+          padding: clamp(18px, 3vw, 34px);
+          background: linear-gradient(180deg, #fbfcfd 0, #f4f6f8 100%);
           scroll-behavior: smooth;
         }
         .message {
+          position: relative;
           display: grid;
           gap: 8px;
-          max-inline-size: 78ch;
-          margin: 0 auto 14px;
-          padding: clamp(14px, 2vw, 20px);
-          border: 1px solid var(--border);
-          border-radius: var(--radius);
+          max-inline-size: 76ch;
+          margin: 0 auto 12px;
+          padding: 16px 18px;
+          border: 1px solid rgba(17, 24, 39, 0.08);
+          border-radius: 10px;
           background: var(--note);
           box-shadow: 0 8px 22px rgba(23, 25, 31, 0.045);
         }
@@ -604,7 +777,7 @@ async function buildTextBatchHtml(manifest, textAssets) {
         }
         .message--prompt {
           background: var(--prompt);
-          border-color: #ead6a3;
+          border-color: #eed9a4;
         }
         .message--response {
           background: var(--response);
@@ -624,7 +797,7 @@ async function buildTextBatchHtml(manifest, textAssets) {
         .message-body {
           color: #111827;
           font-size: 1rem;
-          line-height: 1.72;
+          line-height: 1.68;
           white-space: pre-wrap;
           overflow-wrap: anywhere;
         }
@@ -643,6 +816,45 @@ async function buildTextBatchHtml(manifest, textAssets) {
         .message-body a {
           color: var(--accent-strong);
           font-weight: 650;
+        }
+        .document-flow {
+          max-inline-size: 76ch;
+          margin: 0 auto;
+          color: #111827;
+        }
+        .document-flow h3 {
+          margin: 1.35em 0 0.45em;
+          font-size: 1.24rem;
+          line-height: 1.25;
+        }
+        .document-flow h3:first-child {
+          margin-top: 0;
+        }
+        .document-flow p,
+        .document-flow pre {
+          margin: 0 0 1em;
+          line-height: 1.72;
+          white-space: pre-wrap;
+          overflow-wrap: anywhere;
+        }
+        .document-flow pre,
+        .raw-view {
+          max-width: 100%;
+          overflow: auto;
+          border: 1px solid var(--border);
+          border-radius: 10px;
+          background: #ffffff;
+          padding: 16px;
+          font-family: var(--font-mono);
+          font-size: 0.9rem;
+          line-height: 1.62;
+          tab-size: 2;
+        }
+        mark {
+          border-radius: 4px;
+          background: #fde68a;
+          color: inherit;
+          padding: 0 0.12em;
         }
         .empty-state {
           max-inline-size: 58ch;
@@ -672,6 +884,7 @@ async function buildTextBatchHtml(manifest, textAssets) {
           }
           .reader-layout {
             grid-template-columns: 1fr;
+            min-height: auto;
           }
           .file-list {
             position: static;
@@ -684,20 +897,25 @@ async function buildTextBatchHtml(manifest, textAssets) {
             flex: 0 0 min(280px, 84vw);
             scroll-snap-align: start;
           }
+          .reader-body {
+            grid-template-columns: 1fr;
+          }
+          .reader-inspector {
+            border-top: 1px solid var(--border);
+            border-left: 0;
+          }
           .chat-stream {
+            height: auto;
             min-height: 50vh;
-            max-height: none;
           }
         }
         @media (max-width: 520px) {
           main {
-            width: min(100% - 24px, 1280px);
-            padding: 20px 0 28px;
+            width: min(100% - 16px, 1280px);
+            padding: 10px 0 18px;
           }
           .actions a,
-          .raw-link,
-          .load-more,
-          .ghost-button {
+          .button {
             width: 100%;
           }
           .reader-actions {
@@ -709,10 +927,29 @@ async function buildTextBatchHtml(manifest, textAssets) {
             white-space: normal;
           }
           h1 {
-            font-size: 2rem;
+            font-size: 1.55rem;
           }
           .reader-header {
             display: grid;
+          }
+          .reader-toolbar {
+            grid-template-columns: 1fr;
+            align-items: stretch;
+          }
+          .mode-switch {
+            width: 100%;
+          }
+          .mode-button {
+            flex: 1;
+          }
+          .search-box {
+            grid-template-columns: 1fr;
+          }
+          .chat-stream {
+            padding: 14px;
+          }
+          .message {
+            padding: 14px;
           }
         }
       </style>
@@ -752,14 +989,38 @@ async function buildTextBatchHtml(manifest, textAssets) {
             .replace(/"/g, "&quot;")
             .replace(/'/g, "&#039;");
 
-          const renderInline = (value) => {
+          const escapeRegExp = (value) => String(value).replace(/[|\\\\{}()[\\]^$+*?.]/g, "\\\\$&");
+
+          const highlightSafe = (safe, query) => {
+            const trimmed = String(query || "").trim();
+
+            if (!trimmed) {
+              return safe;
+            }
+
+            return safe.replace(new RegExp(escapeRegExp(escapeInline(trimmed)), "gi"), "<mark>$&</mark>");
+          };
+
+          const renderInline = (value, query) => {
             let safe = escapeInline(value);
+            safe = highlightSafe(safe, query);
             safe = safe.replace(/\`([^\`]+)\`/g, "<code>$1</code>");
             safe = safe.replace(/\\*\\*([^*]+)\\*\\*/g, "<strong>$1</strong>");
             safe = safe.replace(/__([^_]+)__/g, "<strong>$1</strong>");
             safe = safe.replace(/(^|\\s)(https?:\\/\\/[^\\s<]+)/g, '$1<a href="$2" target="_blank" rel="noreferrer">$2</a>');
 
             return safe;
+          };
+
+          const countMatches = (value, query) => {
+            const trimmed = String(query || "").trim();
+
+            if (!trimmed) {
+              return 0;
+            }
+
+            const matches = String(value || "").match(new RegExp(escapeRegExp(trimmed), "gi"));
+            return matches ? matches.length : 0;
           };
 
           const roleFromBlock = (block) => {
@@ -833,26 +1094,11 @@ async function buildTextBatchHtml(manifest, textAssets) {
             });
           };
 
-          const appendChatContent = (panel, text) => {
-            const stream = panel?.querySelector("[data-chat-stream]");
-
-            if (!stream) {
-              return;
-            }
-
-            const existingEmptyState = stream.querySelector(".empty-state");
-            if (existingEmptyState) {
-              existingEmptyState.remove();
-            }
-
+          const renderTranscript = (stream, text, query) => {
             const blocks = splitIntoBlocks(text);
 
-            if (blocks.length === 0 && !stream.children.length) {
-              const empty = document.createElement("div");
-              empty.className = "empty-state";
-              empty.textContent = "This text file is empty.";
-              stream.appendChild(empty);
-              return;
+            if (blocks.length === 0) {
+              return false;
             }
 
             const fragment = document.createDocumentFragment();
@@ -867,13 +1113,97 @@ async function buildTextBatchHtml(manifest, textAssets) {
 
               const body = document.createElement("div");
               body.className = "message-body";
-              body.innerHTML = renderInline(role.text);
+              body.innerHTML = renderInline(role.text, query);
 
               message.append(label, body);
               fragment.appendChild(message);
             });
 
             stream.appendChild(fragment);
+            return true;
+          };
+
+          const renderDocument = (stream, text, query) => {
+            const normalized = String(text || "").replace(/\\r\\n/g, "\\n");
+            const blocks = normalized.split(/\\n{2,}/).map((block) => block.trim()).filter(Boolean);
+
+            if (!blocks.length) {
+              return false;
+            }
+
+            const flow = document.createElement("div");
+            flow.className = "document-flow";
+
+            blocks.forEach((block) => {
+              const heading = block.match(/^#{1,3}\\s+(.+)$/);
+              const element = document.createElement(heading ? "h3" : "p");
+              element.innerHTML = renderInline(heading ? heading[1] : block, query);
+              flow.appendChild(element);
+            });
+
+            stream.appendChild(flow);
+            return true;
+          };
+
+          const renderRaw = (stream, text, query) => {
+            if (!String(text || "").length) {
+              return false;
+            }
+
+            const raw = document.createElement("pre");
+            raw.className = "raw-view";
+            raw.innerHTML = highlightSafe(escapeInline(text), query);
+            stream.appendChild(raw);
+            return true;
+          };
+
+          const updateSearchCount = (panel) => {
+            const content = panel?.querySelector("[data-text-content]");
+            const input = panel?.querySelector("[data-search-input]");
+            const count = panel?.querySelector("[data-search-count]");
+            const query = input?.value || "";
+            const matches = countMatches(content?.value || "", query);
+
+            if (!count) {
+              return;
+            }
+
+            count.textContent = query.trim()
+              ? matches + " " + (matches === 1 ? "match" : "matches")
+              : "No search";
+          };
+
+          const renderPanel = (panel) => {
+            const stream = panel?.querySelector("[data-chat-stream]");
+            const content = panel?.querySelector("[data-text-content]");
+            const input = panel?.querySelector("[data-search-input]");
+
+            if (!stream || !content) {
+              return;
+            }
+
+            const mode = panel.dataset.readerMode || "transcript";
+            const query = input?.value || "";
+            stream.replaceChildren();
+
+            let hasContent = false;
+
+            if (mode === "raw") {
+              hasContent = renderRaw(stream, content.value, query);
+            } else if (mode === "document") {
+              hasContent = renderDocument(stream, content.value, query);
+            } else {
+              hasContent = renderTranscript(stream, content.value, query);
+            }
+
+            if (!hasContent) {
+              const empty = document.createElement("div");
+              empty.className = "empty-state";
+              empty.textContent = "This text file is empty.";
+              stream.appendChild(empty);
+            }
+
+            updateSearchCount(panel);
           };
 
           const formatBytes = (value) => {
@@ -950,7 +1280,7 @@ async function buildTextBatchHtml(manifest, textAssets) {
 
                 const chunk = payload.content || "";
                 content.value += chunk;
-                appendChatContent(panel, chunk);
+                renderPanel(panel);
                 setLoadState(button, payload.nextOffset, payload.size, payload.hasMore);
               } catch (error) {
                 button.disabled = false;
@@ -1006,10 +1336,45 @@ async function buildTextBatchHtml(manifest, textAssets) {
           });
 
           panels.forEach((panel) => {
-            const content = panel.querySelector("[data-text-content]");
-            if (content) {
-              appendChatContent(panel, content.value);
+            panel.dataset.readerMode = "transcript";
+
+            panel.querySelectorAll("[data-reader-mode]").forEach((button) => {
+              button.addEventListener("click", () => {
+                panel.dataset.readerMode = button.dataset.readerMode || "transcript";
+                panel.querySelectorAll("[data-reader-mode]").forEach((item) => {
+                  item.classList.toggle("is-active", item === button);
+                });
+
+                const label = panel.querySelector("[data-active-mode-label]");
+                if (label) {
+                  label.textContent = button.textContent || "Transcript";
+                }
+
+                renderPanel(panel);
+              });
+            });
+
+            const search = panel.querySelector("[data-search-input]");
+            if (search) {
+              search.addEventListener("input", () => renderPanel(panel));
             }
+
+            const stream = panel.querySelector("[data-chat-stream]");
+            const autoLoad = panel.querySelector("[data-auto-load]");
+            stream?.addEventListener("scroll", () => {
+              const button = panel.querySelector("[data-load-more]");
+
+              if (!autoLoad?.checked || !button || button.disabled) {
+                return;
+              }
+
+              const remaining = stream.scrollHeight - stream.scrollTop - stream.clientHeight;
+              if (remaining < 480) {
+                button.click();
+              }
+            });
+
+            renderPanel(panel);
           });
         })();
       </script>
