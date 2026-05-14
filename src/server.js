@@ -277,6 +277,7 @@ async function buildTextBatchHtml(manifest, textAssets) {
   const batchUrl = buildBatchUrl(manifest.batchId);
   const batchJsonUrl = `${batchUrl}/json`;
   const createdAt = manifest.createdAt ? escapeHtml(manifest.createdAt) : "Unknown";
+  const batchIdShort = escapeHtml(String(manifest.batchId || "").slice(0, 8));
 
   const tabs = files
     .map((item, index) => {
@@ -290,7 +291,7 @@ async function buildTextBatchHtml(manifest, textAssets) {
 
       return `
         <button type="button" class="file-tab${isActive ? " is-active" : ""}" data-file-tab data-target-index="${index}" aria-selected="${isActive ? "true" : "false"}">
-          <span class="file-index">0${index + 1}</span>
+          <span class="file-index">${index + 1}</span>
           <span class="file-copy">
             <span class="file-name">${safeName}</span>
             <span class="file-meta">${loaded} loaded · ${size}</span>
@@ -330,26 +331,20 @@ async function buildTextBatchHtml(manifest, textAssets) {
               >${item.hasMore ? "Load more" : "Fully loaded"}</button>
       `;
       const copyButton = item.previewError ? "" : `<button type="button" class="button" data-copy-text>Copy loaded</button>`;
-      const inspector = `
-        <dl class="inspector-list">
-          <div><dt>Type</dt><dd>${safeMimeType}</dd></div>
-          <div><dt>Loaded</dt><dd data-load-status>${escapeHtml(loadedLabel)}</dd></div>
-          <div><dt>Size</dt><dd>${escapeHtml(formatBytes(item.size || 0))}</dd></div>
-          <div><dt>Mode</dt><dd data-active-mode-label>Transcript</dd></div>
-        </dl>
-      `;
 
       return `
         <section class="text-panel" data-file-panel ${index === 0 ? "" : "hidden"}>
           <header class="reader-header">
             <div class="reader-title">
-              <p class="reader-kicker">${safeMimeType}</p>
+              <p class="reader-kicker">${safeMimeType} · <span data-active-mode-label>Transcript</span></p>
               <h2>${safeName}</h2>
+              <p class="reader-subtitle" data-load-status>${escapeHtml(loadedLabel)}</p>
             </div>
             <div class="reader-actions">
               ${copyButton}
               ${loadMoreButton}
               <a href="${rawUrl}" target="_blank" rel="noreferrer" class="button">Raw</a>
+              <a href="${batchJsonUrl}" target="_blank" rel="noreferrer" class="button">JSON</a>
             </div>
           </header>
           <div class="reader-toolbar" aria-label="Reader controls">
@@ -369,13 +364,8 @@ async function buildTextBatchHtml(manifest, textAssets) {
             </label>
           </div>
           <div class="progress-track" aria-hidden="true"><span data-progress-bar style="width: ${progressValue}%"></span></div>
-          <div class="reader-body">
-            <div class="reader-canvas">
-              ${preview}
-            </div>
-            <aside class="reader-inspector" aria-label="File details">
-              ${inspector}
-            </aside>
+          <div class="reader-canvas">
+            ${preview}
           </div>
         </section>
       `;
@@ -982,24 +972,574 @@ async function buildTextBatchHtml(manifest, textAssets) {
             padding: 14px;
           }
         }
+        /* Focused reader redesign: fewer panels, stronger hierarchy, chat-native transcript. */
+        :root {
+          --page: #f7f7f5;
+          --shell: #ffffff;
+          --sidebar: #f1f1ef;
+          --sidebar-border: #deded8;
+          --ink: #202123;
+          --ink-soft: #565b66;
+          --ink-muted: #8a9099;
+          --line: #e3e3df;
+          --line-strong: #cecec8;
+          --primary: #111827;
+          --primary-hover: #242936;
+          --blue: #2563eb;
+          --blue-soft: #edf4ff;
+          --green: #10a37f;
+          --green-soft: #effaf6;
+          --system-soft: #f5f0ff;
+          --user-bubble: #f2f3f5;
+          --font: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+          --font-mono: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+        }
+        body {
+          background: var(--page);
+          color: var(--ink);
+        }
+        main {
+          width: 100%;
+          min-height: 100dvh;
+          margin: 0;
+          padding: 0;
+        }
+        .reader-layout {
+          display: grid;
+          grid-template-columns: minmax(260px, 302px) minmax(0, 1fr);
+          min-height: 100dvh;
+          margin: 0;
+          border: 0;
+          border-radius: 0;
+          background: var(--shell);
+          box-shadow: none;
+          overflow: hidden;
+        }
+        .sidebar {
+          min-width: 0;
+          display: grid;
+          grid-template-rows: auto auto auto minmax(0, 1fr);
+          gap: 12px;
+          min-height: 100dvh;
+          padding: 16px 14px;
+          border-right: 1px solid var(--sidebar-border);
+          background: var(--sidebar);
+        }
+        .brand-block {
+          display: flex;
+          align-items: center;
+          gap: 10px;
+          min-width: 0;
+        }
+        .brand-mark {
+          width: 34px;
+          height: 34px;
+          display: grid;
+          place-items: center;
+          border-radius: 9px;
+          background: #111827;
+          color: #ffffff;
+          font-weight: 800;
+        }
+        .brand-title,
+        .brand-subtitle,
+        .batch-created {
+          margin: 0;
+        }
+        .brand-title {
+          color: var(--ink);
+          font-size: 0.96rem;
+          font-weight: 780;
+          line-height: 1.2;
+        }
+        .brand-subtitle,
+        .batch-created {
+          color: var(--ink-muted);
+          font-size: 0.82rem;
+          font-weight: 650;
+        }
+        .batch-summary {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 6px;
+          align-items: center;
+          color: var(--ink-soft);
+          font-family: var(--font-mono);
+          font-size: 0.78rem;
+        }
+        .batch-summary span {
+          border: 1px solid var(--line);
+          border-radius: 999px;
+          background: rgba(255, 255, 255, 0.62);
+          padding: 4px 8px;
+        }
+        .file-list {
+          min-height: 0;
+          display: grid;
+          align-content: start;
+          gap: 4px;
+          overflow: auto;
+          padding: 4px 0 0;
+          border: 0;
+          background: transparent;
+        }
+        .file-tab {
+          display: grid;
+          grid-template-columns: 22px minmax(0, 1fr);
+          gap: 9px;
+          min-height: 58px;
+          padding: 10px 10px 12px;
+          border: 1px solid transparent;
+          border-radius: 9px;
+          background: transparent;
+          color: var(--ink);
+          transition: background 0.16s ease, border-color 0.16s ease;
+        }
+        .file-tab:hover,
+        .file-tab.is-active {
+          border-color: var(--line-strong);
+          background: #ffffff;
+          transform: none;
+        }
+        .file-index {
+          width: 20px;
+          height: 20px;
+          display: grid;
+          place-items: center;
+          border-radius: 999px;
+          background: #e4e4df;
+          color: var(--ink-soft);
+          font-family: var(--font);
+          font-size: 0.72rem;
+          font-weight: 760;
+        }
+        .file-name {
+          color: var(--ink);
+          font-size: 0.9rem;
+          line-height: 1.2;
+        }
+        .file-meta {
+          color: var(--ink-muted);
+          font-size: 0.78rem;
+        }
+        .file-progress {
+          height: 2px;
+          background: rgba(17, 24, 39, 0.07);
+        }
+        .file-progress span {
+          background: var(--green);
+        }
+        .reader {
+          min-width: 0;
+          background: var(--shell);
+        }
+        .text-panel {
+          height: 100dvh;
+          min-height: 0;
+          display: grid;
+          grid-template-rows: auto auto 2px minmax(0, 1fr);
+        }
+        .text-panel[hidden] {
+          display: none;
+        }
+        .reader-header {
+          min-height: 68px;
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 18px;
+          padding: 12px 22px;
+          border-bottom: 1px solid var(--line);
+          background: rgba(255, 255, 255, 0.96);
+        }
+        .reader-title {
+          min-width: 0;
+        }
+        .reader-kicker {
+          margin: 0 0 3px;
+          color: var(--ink-muted);
+          font-size: 0.72rem;
+          font-weight: 760;
+          letter-spacing: 0.07em;
+          text-transform: uppercase;
+        }
+        .reader h2 {
+          margin: 0;
+          color: var(--ink);
+          font-size: 1.02rem;
+          line-height: 1.24;
+          font-weight: 760;
+          overflow-wrap: anywhere;
+        }
+        .reader-subtitle {
+          margin: 3px 0 0;
+          color: var(--ink-muted);
+          font-size: 0.82rem;
+          font-weight: 650;
+        }
+        .reader-actions {
+          flex: 0 0 auto;
+          display: flex;
+          flex-wrap: wrap;
+          justify-content: flex-end;
+          gap: 8px;
+        }
+        .button {
+          min-height: 34px;
+          border: 1px solid var(--line-strong);
+          border-radius: 8px;
+          background: #ffffff;
+          color: var(--ink);
+          padding: 0 11px;
+          font-size: 0.86rem;
+          font-weight: 720;
+          box-shadow: none;
+        }
+        .button:hover {
+          background: #f5f5f2;
+          border-color: #bdbdb6;
+        }
+        .button-primary {
+          border-color: var(--primary);
+          background: var(--primary);
+          color: #ffffff;
+        }
+        .button-primary:hover {
+          border-color: var(--primary-hover);
+          background: var(--primary-hover);
+        }
+        .button:disabled {
+          border-color: var(--line);
+          background: #f1f1ef;
+          color: var(--ink-muted);
+        }
+        .reader-toolbar {
+          display: grid;
+          grid-template-columns: auto minmax(220px, 1fr) auto auto;
+          align-items: center;
+          gap: 10px;
+          min-height: 50px;
+          padding: 8px 22px;
+          border-bottom: 1px solid var(--line);
+          background: rgba(250, 250, 248, 0.95);
+        }
+        .mode-switch {
+          display: inline-flex;
+          padding: 2px;
+          border: 1px solid var(--line);
+          border-radius: 9px;
+          background: #ffffff;
+        }
+        .mode-button {
+          min-height: 30px;
+          border-radius: 7px;
+          color: var(--ink-soft);
+          padding: 0 10px;
+          font-size: 0.82rem;
+          font-weight: 740;
+        }
+        .mode-button.is-active {
+          background: var(--ink);
+          color: #ffffff;
+        }
+        .search-box {
+          grid-template-columns: minmax(0, 1fr);
+          gap: 4px;
+          color: var(--ink-muted);
+          font-size: 0;
+        }
+        .search-box span {
+          position: absolute;
+          width: 1px;
+          height: 1px;
+          overflow: hidden;
+          clip: rect(0 0 0 0);
+        }
+        .search-box input {
+          min-height: 34px;
+          border: 1px solid var(--line);
+          border-radius: 9px;
+          background: #ffffff;
+          color: var(--ink);
+          padding: 0 11px;
+          font-size: 0.9rem;
+        }
+        .search-count,
+        .auto-load {
+          color: var(--ink-muted);
+          font-size: 0.82rem;
+          font-weight: 700;
+          white-space: nowrap;
+        }
+        .auto-load {
+          color: var(--ink-soft);
+        }
+        .progress-track {
+          height: 2px;
+          background: transparent;
+        }
+        .progress-track span {
+          background: var(--green);
+        }
+        .reader-canvas {
+          min-height: 0;
+          min-width: 0;
+          background: var(--shell);
+        }
+        .chat-stream {
+          height: 100%;
+          min-height: 0;
+          overflow: auto;
+          padding: 30px clamp(20px, 6vw, 82px) 56px;
+          background: var(--shell);
+          scroll-behavior: smooth;
+        }
+        .message {
+          position: relative;
+          width: auto;
+          max-inline-size: min(72ch, 100%);
+          margin: 0 auto 22px;
+          padding: 0;
+          border: 0;
+          border-radius: 0;
+          background: transparent;
+          box-shadow: none;
+        }
+        .message-label {
+          width: fit-content;
+          margin-bottom: 6px;
+          padding: 0;
+          border-radius: 0;
+          background: transparent;
+          color: var(--ink-muted);
+          font-size: 0.72rem;
+          font-weight: 780;
+          letter-spacing: 0.06em;
+          text-transform: uppercase;
+        }
+        .message-body {
+          color: var(--ink);
+          font-size: 0.98rem;
+          line-height: 1.66;
+          white-space: pre-wrap;
+          overflow-wrap: anywhere;
+        }
+        .message--prompt {
+          width: fit-content;
+          max-inline-size: min(66ch, 84%);
+          margin-left: auto;
+          margin-right: 0;
+        }
+        .message--prompt .message-label {
+          justify-self: end;
+          color: #315b9f;
+        }
+        .message--prompt .message-body {
+          border: 1px solid #d8dce3;
+          border-radius: 18px 18px 5px 18px;
+          background: var(--user-bubble);
+          padding: 10px 14px;
+        }
+        .message--response {
+          max-inline-size: min(72ch, 100%);
+          margin-left: 0;
+          margin-right: auto;
+          padding-left: 42px;
+        }
+        .message--response::before {
+          content: "AI";
+          position: absolute;
+          left: 0;
+          top: 1px;
+          width: 28px;
+          height: 28px;
+          display: grid;
+          place-items: center;
+          border-radius: 9px;
+          background: var(--primary);
+          color: #ffffff;
+          font-size: 0.68rem;
+          font-weight: 820;
+          letter-spacing: 0.02em;
+        }
+        .message--response .message-label {
+          color: #157256;
+        }
+        .message--system {
+          max-inline-size: min(64ch, 100%);
+          margin-left: auto;
+          margin-right: auto;
+          border: 1px solid #e6defa;
+          border-radius: 14px;
+          background: var(--system-soft);
+          padding: 10px 14px;
+        }
+        .message--system .message-label {
+          justify-self: center;
+        }
+        .message-body strong {
+          font-weight: 820;
+        }
+        .message-body code {
+          border: 1px solid var(--line);
+          border-radius: 6px;
+          background: #ffffff;
+          padding: 0.08em 0.32em;
+          color: var(--ink);
+          font-family: var(--font-mono);
+          font-size: 0.92em;
+        }
+        .message-body a {
+          color: var(--blue);
+          font-weight: 680;
+        }
+        .document-flow {
+          max-inline-size: 68ch;
+          margin: 0 auto;
+          color: var(--ink);
+        }
+        .document-flow h3 {
+          margin: 1.2em 0 0.45em;
+          font-size: 1.2rem;
+          line-height: 1.28;
+        }
+        .document-flow p,
+        .document-flow pre {
+          margin: 0 0 1em;
+          line-height: 1.68;
+        }
+        .raw-view {
+          max-width: min(100%, 980px);
+          margin: 0 auto;
+          border: 1px solid var(--line);
+          border-radius: 12px;
+          background: #fbfbfa;
+          padding: 16px;
+          font-family: var(--font-mono);
+          font-size: 0.88rem;
+          line-height: 1.6;
+        }
+        mark {
+          border-radius: 4px;
+          background: #ffe58a;
+          color: inherit;
+          padding: 0 0.12em;
+        }
+        .empty-state {
+          max-inline-size: 54ch;
+          margin: 0 auto;
+          border: 1px dashed var(--line-strong);
+          border-radius: 14px;
+          background: #fbfbfa;
+          color: var(--ink-muted);
+          padding: 42px 28px;
+          text-align: center;
+        }
+        .preview-message {
+          color: var(--ink-muted);
+          background: #fbfbfa;
+        }
+        @media (max-width: 980px) {
+          .reader-layout {
+            grid-template-columns: 1fr;
+            min-height: 100dvh;
+          }
+          .sidebar {
+            min-height: auto;
+            grid-template-rows: auto auto auto;
+            gap: 8px;
+            padding: 10px 12px;
+            border-right: 0;
+            border-bottom: 1px solid var(--sidebar-border);
+          }
+          .brand-block {
+            display: none;
+          }
+          .batch-created {
+            display: none;
+          }
+          .file-list {
+            display: flex;
+            gap: 6px;
+            overflow-x: auto;
+            padding: 2px 0 0;
+          }
+          .file-tab {
+            flex: 0 0 min(285px, 84vw);
+          }
+          .text-panel {
+            height: auto;
+            min-height: calc(100dvh - 110px);
+          }
+          .chat-stream {
+            height: auto;
+            min-height: 62vh;
+          }
+        }
+        @media (max-width: 620px) {
+          .reader-header {
+            display: grid;
+            align-items: start;
+            padding: 12px 14px;
+          }
+          .reader-actions {
+            width: 100%;
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+          }
+          .button {
+            width: 100%;
+          }
+          .reader-toolbar {
+            grid-template-columns: 1fr;
+            padding: 10px 14px;
+          }
+          .mode-switch {
+            width: 100%;
+          }
+          .mode-button {
+            flex: 1;
+          }
+          .search-count,
+          .auto-load {
+            white-space: normal;
+          }
+          .chat-stream {
+            padding: 22px 14px 44px;
+          }
+          .message--prompt {
+            max-inline-size: 92%;
+          }
+          .message--response {
+            padding-left: 36px;
+          }
+          .message--response::before {
+            width: 26px;
+            height: 26px;
+          }
+        }
       </style>
     </head>
     <body>
       <main>
-        <header class="topbar">
-          <div>
-            <p class="eyebrow">AssetLink text batch</p>
-            <h1>Batch ${batchId}</h1>
-            <p class="batch-meta">${totalTexts} ${totalTexts === 1 ? "file" : "files"} · Created ${createdAt}</p>
-          </div>
-          <nav class="actions" aria-label="Batch actions">
-            <a href="${batchJsonUrl}" target="_blank" rel="noreferrer">View JSON</a>
-          </nav>
-        </header>
         <section class="reader-layout" aria-label="Uploaded text files">
-          <nav class="file-list" aria-label="Choose a text file">
-            ${tabs}
-          </nav>
+          <aside class="sidebar">
+            <div class="brand-block">
+              <div class="brand-mark" aria-hidden="true">A</div>
+              <div>
+                <p class="brand-title">AssetLink</p>
+                <p class="brand-subtitle">Text reader</p>
+              </div>
+            </div>
+            <div class="batch-summary">
+              <span>Batch ${batchIdShort}</span>
+              <span>${totalTexts} ${totalTexts === 1 ? "file" : "files"}</span>
+            </div>
+            <p class="batch-created">Created ${createdAt}</p>
+            <nav class="file-list" aria-label="Choose a text file">
+              ${tabs}
+            </nav>
+          </aside>
           <div class="reader">
             ${panels}
           </div>
