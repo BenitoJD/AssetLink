@@ -1639,47 +1639,79 @@ async function buildTextBatchHtml(manifest, textAssets) {
           const splitIntoBlocks = (text) => {
             const normalized = String(text || "").replace(/\\r\\n/g, "\\n");
             const roleLinePattern = /^\\s*(system|developer|user|human|prompt|assistant|codex|response)\\s*[:\\-]\\s*/i;
+            const roleHeadingPattern = /^\\s*#{1,6}\\s*(system|developer|user|human|prompt|assistant|codex|response)\\s*:?\\s*$/i;
             const blocks = [];
             let current = [];
+            let currentIsRoleBlock = false;
+
+            const pushCurrent = () => {
+              if (!current.length) {
+                return;
+              }
+
+              blocks.push(current.join("\\n").trim());
+              current = [];
+              currentIsRoleBlock = false;
+            };
 
             normalized.split("\\n").forEach((line) => {
               const trimmed = line.trim();
+              const headingMatch = line.match(roleHeadingPattern);
+
+              if (headingMatch) {
+                pushCurrent();
+                current = [headingMatch[1] + ":"];
+                currentIsRoleBlock = true;
+                return;
+              }
 
               if (!trimmed) {
-                if (current.length) {
-                  blocks.push(current.join("\\n").trim());
-                  current = [];
+                if (currentIsRoleBlock) {
+                  if (current.length > 1) {
+                    current.push("");
+                  }
+                  return;
                 }
+
+                pushCurrent();
                 return;
               }
 
               if (roleLinePattern.test(line) && current.length) {
-                blocks.push(current.join("\\n").trim());
+                pushCurrent();
                 current = [line];
+                currentIsRoleBlock = true;
                 return;
               }
 
               current.push(line);
             });
 
-            if (current.length) {
-              blocks.push(current.join("\\n").trim());
-            }
+            pushCurrent();
 
             if (blocks.length === 0) {
               return [];
             }
 
             return blocks.flatMap((block) => {
-              const lines = block.split("\\n");
+              const role = roleFromBlock(block);
+              const lines = role.text.split("\\n");
 
               if (lines.length <= 18) {
                 return [block];
               }
 
+              const rolePrefix = role.tone === "response"
+                ? "Assistant:"
+                : role.tone === "prompt"
+                  ? "User:"
+                  : role.tone === "system"
+                    ? "System:"
+                    : "";
               const groups = [];
               for (let index = 0; index < lines.length; index += 14) {
-                groups.push(lines.slice(index, index + 14).join("\\n"));
+                const group = lines.slice(index, index + 14).join("\\n").trim();
+                groups.push(rolePrefix ? rolePrefix + " " + group : group);
               }
 
               return groups;
