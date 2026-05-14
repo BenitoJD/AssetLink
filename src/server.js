@@ -764,7 +764,8 @@ async function buildTextBatchHtml(manifest, textAssets) {
           position: relative;
           display: grid;
           gap: 8px;
-          max-inline-size: 76ch;
+          width: fit-content;
+          max-inline-size: min(76ch, 100%);
           margin: 0 auto 12px;
           padding: 16px 18px;
           border: 1px solid rgba(17, 24, 39, 0.08);
@@ -776,23 +777,52 @@ async function buildTextBatchHtml(manifest, textAssets) {
           margin-bottom: 0;
         }
         .message--prompt {
-          background: var(--prompt);
-          border-color: #eed9a4;
+          margin-left: auto;
+          margin-right: 0;
+          background: #eef5ff;
+          border-color: #9ec4ff;
+          box-shadow:
+            inset -4px 0 0 var(--accent),
+            0 8px 22px rgba(15, 111, 255, 0.08);
         }
         .message--response {
-          background: var(--response);
-          border-color: #c9e5d4;
+          margin-left: 0;
+          margin-right: auto;
+          background: #f3fbf7;
+          border-color: #addfc5;
+          box-shadow:
+            inset 4px 0 0 var(--success),
+            0 8px 22px rgba(31, 138, 91, 0.07);
         }
         .message--system {
+          margin-left: auto;
+          margin-right: auto;
           background: var(--system);
           border-color: #d8c5f5;
         }
         .message-label {
+          width: fit-content;
+          border-radius: 999px;
+          padding: 3px 8px;
+          background: rgba(17, 24, 39, 0.06);
           color: var(--muted-strong);
           font-size: 0.76rem;
           font-weight: 800;
           letter-spacing: 0.08em;
           text-transform: uppercase;
+        }
+        .message--prompt .message-label {
+          justify-self: end;
+          background: rgba(15, 111, 255, 0.12);
+          color: #0b4fb3;
+        }
+        .message--response .message-label {
+          justify-self: start;
+          background: rgba(31, 138, 91, 0.12);
+          color: #176b47;
+        }
+        .message--system .message-label {
+          justify-self: center;
         }
         .message-body {
           color: #111827;
@@ -1034,14 +1064,14 @@ async function buildTextBatchHtml(manifest, textAssets) {
             const text = block.slice(match[0].length);
 
             if (rawRole === "assistant" || rawRole === "codex" || rawRole === "response") {
-              return { label: "Response", tone: "response", text };
+              return { label: "AI Assistant", tone: "response", text };
             }
 
             if (rawRole === "system" || rawRole === "developer") {
               return { label: "System", tone: "system", text };
             }
 
-            return { label: "Prompt", tone: "prompt", text };
+            return { label: "User", tone: "prompt", text };
           };
 
           const splitIntoBlocks = (text) => {
