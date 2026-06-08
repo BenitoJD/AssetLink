@@ -1,6 +1,6 @@
 # AssetLink
 
-AssetLink is a minimal upload API backed by MinIO. It supports image uploads and text-file uploads. Every upload request creates a new batch link, so files uploaded together are viewed together and do not mix with older uploads.
+AssetLink is a minimal upload API backed by MinIO. It supports image uploads, video uploads, and text-file uploads. Every upload request creates a new batch link, so files uploaded together are viewed together and do not mix with older uploads.
 
 Uploads are API-only. There is no frontend upload form. The browser UI is only for opening generated batch links.
 
@@ -8,6 +8,7 @@ Uploads are API-only. There is no frontend upload form. The browser UI is only f
 
 - `GET /` returns basic API information.
 - `POST /upload` uploads image files using multipart field `images`.
+- `POST /upload-video` uploads video files using multipart field `videos`.
 - `POST /upload-text` uploads text-based files using multipart field `texts`.
 - `GET /uploads/:batchId` opens the public viewer for one upload batch.
 - `GET /uploads/:batchId/json` returns the batch manifest as JSON.
@@ -69,11 +70,13 @@ Expected response shape:
 {
   "service": "AssetLink",
   "uploadEndpoint": "POST /upload",
+  "videoUploadEndpoint": "POST /upload-video",
   "textUploadEndpoint": "POST /upload-text",
   "textChunkEndpoint": "GET /uploads/:batchId/text/:assetIndex?offset=<bytes>&limit=<bytes>",
   "auth": "Authorization: Bearer <API_TOKEN>",
   "uploadResult": "Each upload returns a batch-specific link at /uploads/:batchId",
   "imageField": "images",
+  "videoField": "videos",
   "textField": "texts"
 }
 ```
@@ -116,6 +119,45 @@ http://localhost:3000/uploads/<batchId>
 ```
 
 Image batches render as a gallery/carousel. For multiple images, use arrows, dots, keyboard navigation, or swipe gestures.
+
+## Upload Videos
+
+Use `POST /upload-video` with multipart form data. The file field must be named `videos`.
+
+```bash
+curl -X POST http://localhost:3000/upload-video \
+  -H "Authorization: Bearer super-secret-token" \
+  -F "videos=@/path/to/clip-1.mp4" \
+  -F "videos=@/path/to/clip-2.webm"
+```
+
+Example response:
+
+```json
+{
+  "message": "Videos uploaded successfully",
+  "batchId": "0d4f5d4f-8e2b-4f33-bfd9-1e4d364e9f83",
+  "batchUrl": "http://localhost:3000/uploads/0d4f5d4f-8e2b-4f33-bfd9-1e4d364e9f83",
+  "batchJsonUrl": "http://localhost:3000/uploads/0d4f5d4f-8e2b-4f33-bfd9-1e4d364e9f83/json",
+  "videos": [
+    {
+      "type": "video",
+      "originalName": "clip-1.mp4",
+      "objectKey": "1710000000000-uuid.mp4",
+      "mimeType": "video/mp4",
+      "url": "http://localhost:3000/assets/1710000000000-uuid.mp4"
+    }
+  ]
+}
+```
+
+Open the returned `batchUrl` in a browser:
+
+```text
+http://localhost:3000/uploads/<batchId>
+```
+
+Video batches render as a carousel with native browser playback controls. The asset endpoint supports HTTP range requests so videos can seek and buffer efficiently.
 
 ## Upload Text Files
 
@@ -258,6 +300,7 @@ Text batch response shape:
     }
   ],
   "images": [],
+  "videos": [],
   "batchUrl": "http://localhost:3000/uploads/0d4f5d4f-8e2b-4f33-bfd9-1e4d364e9f83"
 }
 ```
@@ -276,7 +319,7 @@ Example:
 curl http://localhost:3000/assets/1710000000000-uuid.txt
 ```
 
-The raw asset response includes `X-Content-Type-Options: nosniff`.
+The raw asset response includes `X-Content-Type-Options: nosniff` and `Accept-Ranges: bytes`. Video playback uses HTTP range requests (`206 Partial Content`) for seeking.
 
 ## Environment Variables
 
@@ -312,6 +355,14 @@ curl -k -X POST https://203.57.85.94:3010/upload \
   -H "Authorization: Bearer <API_TOKEN>" \
   -F "images=@/path/to/image-1.jpg" \
   -F "images=@/path/to/image-2.png"
+```
+
+### Production Video Upload
+
+```bash
+curl -k -X POST https://203.57.85.94:3010/upload-video \
+  -H "Authorization: Bearer <API_TOKEN>" \
+  -F "videos=@/path/to/clip.mp4"
 ```
 
 ### Production Text Upload

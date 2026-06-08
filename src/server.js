@@ -13,6 +13,7 @@ const {
   ensureBucket,
   getObjectBuffer,
   getObjectRangeBuffer,
+  getObjectRangeStream,
   getObjectStream,
   listObjects,
   statObject,
@@ -77,6 +78,30 @@ function buildAssetUrl(objectKey) {
   return `${config.publicBaseUrl}/assets/${encodeURIComponent(objectKey)}`;
 }
 
+function parseByteRange(rangeHeader, size) {
+  const match = /^bytes=(\d*)-(\d*)$/i.exec(String(rangeHeader || "").trim());
+
+  if (!match) {
+    return null;
+  }
+
+  const [, startPart, endPart] = match;
+  let start = startPart === "" ? Math.max(size - Number(endPart), 0) : Number(startPart);
+  let end = endPart === "" ? size - 1 : Number(endPart);
+
+  if (!Number.isFinite(start) || !Number.isFinite(end) || start < 0 || end < start || start >= size) {
+    return { invalid: true, size };
+  }
+
+  end = Math.min(end, size - 1);
+
+  return {
+    start,
+    end,
+    length: end - start + 1
+  };
+}
+
 function buildBatchUrl(batchId) {
   return `${config.publicBaseUrl}/uploads/${encodeURIComponent(batchId)}`;
 }
@@ -93,6 +118,22 @@ function isSupportedTextFile(originalName, mimeType) {
   return normalizedMimeType.startsWith("text/")
     || TEXT_MIME_TYPES.has(normalizedMimeType)
     || TEXT_EXTENSIONS.has(ext);
+}
+
+function resolveVideoMimeType(originalName, mimeType) {
+  const normalizedMimeType = String(mimeType || "").toLowerCase().split(";")[0].trim();
+
+  if (normalizedMimeType.startsWith("video/")) {
+    return normalizedMimeType;
+  }
+
+  const detectedMimeType = mime.lookup(originalName);
+
+  if (detectedMimeType && String(detectedMimeType).startsWith("video/")) {
+    return detectedMimeType;
+  }
+
+  return null;
 }
 
 function normalizeManifestAssets(manifest) {
@@ -116,7 +157,15 @@ function normalizeManifestAssets(manifest) {
     }))
     : [];
 
-  return [...images, ...texts];
+  const videos = Array.isArray(manifest.videos)
+    ? manifest.videos.map((item) => ({
+      type: "video",
+      mimeType: item.mimeType || mime.lookup(item.objectKey) || "video/*",
+      ...item
+    }))
+    : [];
+
+  return [...images, ...texts, ...videos];
 }
 
 function batchManifestKey(batchId) {
@@ -130,12 +179,14 @@ async function saveBatchManifest(batchId, assets) {
   }));
   const images = normalizedAssets.filter((asset) => asset.type === "image");
   const texts = normalizedAssets.filter((asset) => asset.type === "text");
+  const videos = normalizedAssets.filter((asset) => asset.type === "video");
   const manifest = {
     batchId,
     createdAt: new Date().toISOString(),
     assets: normalizedAssets,
     texts,
-    images
+    images,
+    videos
   };
 
   await uploadObject({
@@ -2010,9 +2061,17 @@ async function buildBatchHtml(manifest) {
   const assets = normalizeManifestAssets(manifest);
   const imageAssets = assets.filter((asset) => asset.type === "image");
   const textAssets = assets.filter((asset) => asset.type === "text");
+  const videoAssets = assets.filter((asset) => asset.type === "video");
 
-  if (textAssets.length > 0 && imageAssets.length === 0) {
+  if (textAssets.length > 0 && imageAssets.length === 0 && videoAssets.length === 0) {
     return buildTextBatchHtml(manifest, textAssets);
+  }
+
+  if (videoAssets.length > 0 && imageAssets.length === 0 && textAssets.length === 0) {
+    return buildVideoBatchHtml({
+      ...manifest,
+      videos: videoAssets
+    });
   }
 
   return buildImageBatchHtml({
@@ -2021,60 +2080,70 @@ async function buildBatchHtml(manifest) {
   });
 }
 
-function buildImageBatchHtml(manifest) {
-  const totalImages = manifest.images.length;
+function capitalizeLabel(value) {
+  return value.charAt(0).toUpperCase() + value.slice(1);
+}
+
+function buildMediaBatchHtml(manifest, mediaItems, { singular, plural, emptyIcon, hasVideo = false }) {
+  const totalItems = mediaItems.length;
+  const label = capitalizeLabel(singular);
   const batchId = escapeHtml(manifest.batchId);
   const batchUrl = buildBatchUrl(manifest.batchId);
   const batchJsonUrl = `${batchUrl}/json`;
-  const batchSummary = totalImages > 1
-    ? "Browse the upload one image at a time."
-    : totalImages === 1
+  const batchSummary = totalItems > 1
+    ? `Browse the upload one ${singular} at a time.`
+    : totalItems === 1
       ? "Browse the upload at full size."
-      : "This batch does not contain any images yet.";
+      : `This batch does not contain any ${plural} yet.`;
 
-  const imageSlides = manifest.images
+  const mediaSlides = mediaItems
     .map((item, index) => {
-      const imageUrl = buildAssetUrl(item.objectKey);
-      const safeName = escapeHtml(item.originalName || "Uploaded image");
+      const mediaUrl = buildAssetUrl(item.objectKey);
+      const safeName = escapeHtml(item.originalName || `Uploaded ${singular}`);
       const slideNumber = index + 1;
+      const isVideo = item.type === "video";
+      const mediaElement = isVideo
+        ? `<video src="${mediaUrl}" controls preload="metadata" class="slide-media slide-video" playsinline></video>`
+        : `<img src="${mediaUrl}" alt="${safeName}" loading="${index === 0 ? "eager" : "lazy"}" class="slide-media slide-image" />`;
+      const openLabel = isVideo ? "Open original" : "Open full size";
 
       return `
-        <figure class="slide${index === 0 ? " is-active" : ""}" data-carousel-slide data-carousel-slide-index="${index}" aria-label="Image ${slideNumber} of ${totalImages}">
+        <figure class="slide${index === 0 ? " is-active" : ""}" data-carousel-slide data-carousel-slide-index="${index}" aria-label="${label} ${slideNumber} of ${totalItems}">
           <div class="slide-frame">
-            <img src="${imageUrl}" alt="${safeName}" loading="${index === 0 ? "eager" : "lazy"}" class="slide-image" />
+            ${mediaElement}
           </div>
           <figcaption class="slide-caption">
             <div class="slide-copy">
-              <p class="slide-kicker">Image ${slideNumber} of ${totalImages}</p>
+              <p class="slide-kicker">${label} ${slideNumber} of ${totalItems}</p>
               <h2 class="slide-title">${safeName}</h2>
             </div>
-            <a href="${imageUrl}" target="_blank" rel="noreferrer" class="open-original">Open full size</a>
+            <a href="${mediaUrl}" target="_blank" rel="noreferrer" class="open-original">${openLabel}</a>
           </figcaption>
         </figure>
       `;
     })
     .join("");
 
-  const carouselControls = totalImages > 1 ? `
+  const carouselControls = totalItems > 1 ? `
           <div class="carousel-controls" aria-label="Carousel navigation">
-            <button type="button" class="carousel-control" data-carousel-prev aria-label="Previous image">
+            <button type="button" class="carousel-control" data-carousel-prev aria-label="Previous ${singular}">
               <span aria-hidden="true">&larr;</span>
             </button>
-            <button type="button" class="carousel-control" data-carousel-next aria-label="Next image">
+            <button type="button" class="carousel-control" data-carousel-next aria-label="Next ${singular}">
               <span aria-hidden="true">&rarr;</span>
             </button>
           </div>
   ` : "";
 
-  const carouselDots = totalImages > 1 ? `
-            <div class="carousel-dots" aria-label="Choose an image">
-              ${manifest.images
+  const carouselDots = totalItems > 1 ? `
+            <div class="carousel-dots" aria-label="Choose a ${singular}">
+              ${mediaItems
                 .map((_, index) => {
                   const isActive = index === 0 ? " is-active" : "";
                   const ariaCurrent = index === 0 ? "true" : "false";
 
                   return `
-                <button type="button" class="carousel-dot${isActive}" data-carousel-dot data-target-index="${index}" aria-label="Go to image ${index + 1}" aria-current="${ariaCurrent}"></button>
+                <button type="button" class="carousel-dot${isActive}" data-carousel-dot data-target-index="${index}" aria-label="Go to ${singular} ${index + 1}" aria-current="${ariaCurrent}"></button>
               `;
                 })
                 .join("")}
@@ -2293,13 +2362,17 @@ function buildImageBatchHtml(manifest) {
           pointer-events: none;
           box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.5);
         }
-        .slide-image {
+        .slide-image,
+        .slide-video {
           width: 100%;
           height: 100%;
           object-fit: contain;
           display: block;
           border-radius: clamp(12px, 1.5vw, calc(var(--radius-xl) - 16px));
           background: transparent;
+        }
+        .slide-video {
+          background: #000;
         }
         .slide.is-active .slide-frame {
           border-color: rgba(184, 120, 75, 0.32);
@@ -2529,10 +2602,14 @@ function buildImageBatchHtml(manifest) {
           .slide-frame::after {
             display: none;
           }
-          .slide-image {
+          .slide-image,
+          .slide-video {
             width: 100%;
             height: auto;
             border-radius: var(--radius-lg);
+          }
+          .slide-video {
+            background: #000;
           }
           .slide.is-active .slide-frame {
             border-color: transparent;
@@ -2666,7 +2743,8 @@ function buildImageBatchHtml(manifest) {
           .slide-frame::after {
             display: none;
           }
-          .slide-image {
+          .slide-image,
+          .slide-video {
             width: 100%;
             height: auto;
             max-height: 90vh;
@@ -2683,7 +2761,7 @@ function buildImageBatchHtml(manifest) {
         <div class="header">
           <h1>Batch ${batchId}</h1>
           <div class="batch-info">
-            <span>${totalImages} ${totalImages === 1 ? "image" : "images"}</span>
+            <span>${totalItems} ${totalItems === 1 ? singular : plural}</span>
             <span class="batch-id">${batchId}</span>
           </div>
           <p class="batch-summary">${batchSummary}</p>
@@ -2696,26 +2774,26 @@ function buildImageBatchHtml(manifest) {
             Print Gallery
           </button>
         </div>
-        ${totalImages > 0 ? `
-          <section class="carousel" aria-label="Batch image carousel" data-carousel>
+        ${totalItems > 0 ? `
+          <section class="carousel" aria-label="Batch ${singular} carousel" data-carousel${hasVideo ? ' data-carousel-has-video="true"' : ""}>
             <div class="carousel-shell">
               <div class="carousel-viewport" data-carousel-viewport tabindex="0">
                 <div class="carousel-track">
-                  ${imageSlides}
+                  ${mediaSlides}
                 </div>
               </div>
               ${carouselControls}
             </div>
             <div class="carousel-footer">
-              <p class="carousel-status" data-carousel-status aria-live="polite">Image 1 of ${totalImages}</p>
+              <p class="carousel-status" data-carousel-status aria-live="polite">${label} 1 of ${totalItems}</p>
               ${carouselDots}
             </div>
           </section>
         ` : `
           <div class="empty">
-            <div class="empty-icon">📷</div>
-            <h2 class="empty-title">No images uploaded yet</h2>
-            <p class="empty-description">Upload images to browse them here in a full-size carousel.</p>
+            <div class="empty-icon">${emptyIcon}</div>
+            <h2 class="empty-title">No ${plural} uploaded yet</h2>
+            <p class="empty-description">Upload ${plural} to browse them here in a full-size carousel.</p>
           </div>
         `}
       </main>
@@ -2765,7 +2843,15 @@ function buildImageBatchHtml(manifest) {
             });
 
             if (status) {
-              status.textContent = 'Image ' + (currentIndex + 1) + ' of ' + total;
+              status.textContent = '${label} ' + (currentIndex + 1) + ' of ' + total;
+            }
+
+            if (carousel.dataset.carouselHasVideo === 'true') {
+              slides.forEach((slide, slideIndex) => {
+                if (slideIndex !== currentIndex) {
+                  slide.querySelector('video')?.pause();
+                }
+              });
             }
           };
 
@@ -2860,15 +2946,34 @@ function buildImageBatchHtml(manifest) {
   </html>`;
 }
 
+function buildImageBatchHtml(manifest) {
+  return buildMediaBatchHtml(manifest, manifest.images, {
+    singular: "image",
+    plural: "images",
+    emptyIcon: "📷"
+  });
+}
+
+function buildVideoBatchHtml(manifest) {
+  return buildMediaBatchHtml(manifest, manifest.videos, {
+    singular: "video",
+    plural: "videos",
+    emptyIcon: "🎬",
+    hasVideo: true
+  });
+}
+
 app.get("/", (req, res) => {
   res.json({
     service: "AssetLink",
     uploadEndpoint: "POST /upload",
+    videoUploadEndpoint: "POST /upload-video",
     textUploadEndpoint: "POST /upload-text",
     textChunkEndpoint: "GET /uploads/:batchId/text/:assetIndex?offset=<bytes>&limit=<bytes>",
     auth: "Authorization: Bearer <API_TOKEN>",
     uploadResult: "Each upload returns a batch-specific link at /uploads/:batchId",
     imageField: "images",
+    videoField: "videos",
     textField: "texts"
   });
 });
@@ -2977,6 +3082,126 @@ app.post("/upload", requireToken, async (req, res, next) => {
     return res.status(201).json(result);
   } catch (error) {
     if (error.message === "At least one image file is required in the images field") {
+      return res.status(400).json({
+        error: error.message
+      });
+    }
+
+    if (error.message.startsWith("Unsupported file type for ")) {
+      return res.status(400).json({
+        error: error.message
+      });
+    }
+
+    return next(error);
+  }
+});
+
+app.post("/upload-video", requireToken, async (req, res, next) => {
+  let parser;
+
+  try {
+    parser = busboy({
+      headers: req.headers
+    });
+  } catch (error) {
+    return res.status(400).json({
+      error: "Request must be multipart/form-data"
+    });
+  }
+
+  try {
+    const result = await new Promise((resolve, reject) => {
+      const batchId = crypto.randomUUID();
+      const uploaded = [];
+      const uploadTasks = [];
+      let fileCount = 0;
+      let videoIndex = 0;
+      let failed = false;
+
+      const fail = (error) => {
+        if (failed) {
+          return;
+        }
+        failed = true;
+        reject(error);
+      };
+
+      parser.on("file", (fieldName, fileStream, info) => {
+        const originalName = info.filename || "upload";
+        const mimeType = info.mimeType || "application/octet-stream";
+        const resolvedMimeType = resolveVideoMimeType(originalName, mimeType);
+
+        if (fieldName !== "videos") {
+          fileStream.resume();
+          return;
+        }
+
+        if (!resolvedMimeType) {
+          fileStream.resume();
+          fail(new Error(`Unsupported file type for ${originalName}`));
+          return;
+        }
+
+        fileCount += 1;
+        const currentVideoIndex = videoIndex;
+        videoIndex += 1;
+
+        const objectKey = safeObjectName(originalName);
+        const uploadTask = uploadObjectStream({
+          objectName: objectKey,
+          stream: fileStream,
+          contentType: resolvedMimeType
+        })
+          .then(() => {
+            uploaded[currentVideoIndex] = {
+              type: "video",
+              originalName,
+              objectKey,
+              mimeType: resolvedMimeType,
+              url: buildAssetUrl(objectKey)
+            };
+          })
+          .catch(fail);
+
+        fileStream.on("error", fail);
+        uploadTasks.push(uploadTask);
+      });
+
+      parser.on("error", fail);
+
+      parser.on("close", async () => {
+        if (failed) {
+          return;
+        }
+
+        try {
+          await Promise.all(uploadTasks);
+
+          if (fileCount === 0) {
+            return reject(new Error("At least one video file is required in the videos field"));
+          }
+
+          await saveBatchManifest(batchId, uploaded);
+
+          resolve({
+            message: "Videos uploaded successfully",
+            batchId,
+            batchUrl: buildBatchUrl(batchId),
+            batchJsonUrl: `${buildBatchUrl(batchId)}/json`,
+            videos: uploaded
+          });
+        } catch (error) {
+          fail(error);
+        }
+      });
+
+      req.pipe(parser);
+    });
+
+    return res.status(201).json(result);
+  } catch (error) {
+    if (error.message === "At least one video file is required in the videos field") {
       return res.status(400).json({
         error: error.message
       });
@@ -3116,11 +3341,35 @@ app.get("/assets/:objectKey", async (req, res, next) => {
   try {
     const objectKey = req.params.objectKey;
     const meta = await statObject(objectKey);
-    const stream = await getObjectStream(objectKey);
+    const contentType = meta.metaData["content-type"] || mime.lookup(objectKey) || "application/octet-stream";
+    const size = Number(meta.size || 0);
+    const range = parseByteRange(req.headers.range, size);
 
-    res.setHeader("Content-Type", meta.metaData["content-type"] || mime.lookup(objectKey) || "application/octet-stream");
+    res.setHeader("Accept-Ranges", "bytes");
     res.setHeader("X-Content-Type-Options", "nosniff");
-    stream.pipe(res);
+
+    if (range?.invalid) {
+      res.setHeader("Content-Range", `bytes */${size}`);
+      return res.status(416).end();
+    }
+
+    if (range) {
+      const stream = await getObjectRangeStream(objectKey, range.start, range.length);
+
+      res.status(206);
+      res.setHeader("Content-Range", `bytes ${range.start}-${range.end}/${size}`);
+      res.setHeader("Content-Length", range.length);
+      res.setHeader("Content-Type", contentType);
+      return stream.pipe(res);
+    }
+
+    res.setHeader("Content-Type", contentType);
+    if (size > 0) {
+      res.setHeader("Content-Length", size);
+    }
+
+    const stream = await getObjectStream(objectKey);
+    return stream.pipe(res);
   } catch (error) {
     if (error.code === "NotFound" || error.code === "NoSuchKey") {
       return res.status(404).json({
