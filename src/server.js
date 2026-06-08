@@ -2067,10 +2067,18 @@ async function buildBatchHtml(manifest) {
     return buildTextBatchHtml(manifest, textAssets);
   }
 
-  if (videoAssets.length > 0 && imageAssets.length === 0 && textAssets.length === 0) {
-    return buildVideoBatchHtml({
-      ...manifest,
-      videos: videoAssets
+  const mediaAssets = [...imageAssets, ...videoAssets];
+
+  if (mediaAssets.length > 0) {
+    const hasVideo = videoAssets.length > 0;
+    const hasImage = imageAssets.length > 0;
+    const isMixed = hasVideo && hasImage;
+
+    return buildMediaBatchHtml(manifest, mediaAssets, {
+      singular: isMixed ? "file" : hasVideo ? "video" : "image",
+      plural: isMixed ? "files" : hasVideo ? "videos" : "images",
+      emptyIcon: isMixed ? "🎞️" : hasVideo ? "🎬" : "📷",
+      hasVideo
     });
   }
 
@@ -2102,19 +2110,20 @@ function buildMediaBatchHtml(manifest, mediaItems, { singular, plural, emptyIcon
       const safeName = escapeHtml(item.originalName || `Uploaded ${singular}`);
       const slideNumber = index + 1;
       const isVideo = item.type === "video";
+      const itemLabel = capitalizeLabel(item.type === "video" ? "video" : "image");
       const mediaElement = isVideo
         ? `<video src="${mediaUrl}" controls preload="metadata" class="slide-media slide-video" playsinline></video>`
         : `<img src="${mediaUrl}" alt="${safeName}" loading="${index === 0 ? "eager" : "lazy"}" class="slide-media slide-image" />`;
       const openLabel = isVideo ? "Open original" : "Open full size";
 
       return `
-        <figure class="slide${index === 0 ? " is-active" : ""}" data-carousel-slide data-carousel-slide-index="${index}" aria-label="${label} ${slideNumber} of ${totalItems}">
+        <figure class="slide${index === 0 ? " is-active" : ""}" data-carousel-slide data-carousel-slide-index="${index}" data-slide-label="${itemLabel}" aria-label="${itemLabel} ${slideNumber} of ${totalItems}">
           <div class="slide-frame">
             ${mediaElement}
           </div>
           <figcaption class="slide-caption">
             <div class="slide-copy">
-              <p class="slide-kicker">${label} ${slideNumber} of ${totalItems}</p>
+              <p class="slide-kicker">${itemLabel} ${slideNumber} of ${totalItems}</p>
               <h2 class="slide-title">${safeName}</h2>
             </div>
             <a href="${mediaUrl}" target="_blank" rel="noreferrer" class="open-original">${openLabel}</a>
@@ -2843,7 +2852,8 @@ function buildMediaBatchHtml(manifest, mediaItems, { singular, plural, emptyIcon
             });
 
             if (status) {
-              status.textContent = '${label} ' + (currentIndex + 1) + ' of ' + total;
+              const slideLabel = slides[currentIndex]?.dataset.slideLabel || '${label}';
+              status.textContent = slideLabel + ' ' + (currentIndex + 1) + ' of ' + total;
             }
 
             if (carousel.dataset.carouselHasVideo === 'true') {
@@ -2997,7 +3007,7 @@ app.post("/upload", requireToken, async (req, res, next) => {
       const uploaded = [];
       const uploadTasks = [];
       let fileCount = 0;
-      let imageIndex = 0;
+      let assetIndex = 0;
       let failed = false;
 
       const fail = (error) => {
@@ -3011,34 +3021,48 @@ app.post("/upload", requireToken, async (req, res, next) => {
       parser.on("file", (fieldName, fileStream, info) => {
         const originalName = info.filename || "upload";
         const mimeType = info.mimeType || "application/octet-stream";
+        let assetType = null;
+        let contentType = mimeType;
 
-        if (fieldName !== "images") {
-          fileStream.resume();
-          return;
-        }
+        if (fieldName === "images") {
+          if (!mimeType.startsWith("image/")) {
+            fileStream.resume();
+            fail(new Error(`Unsupported file type for ${originalName}`));
+            return;
+          }
+          assetType = "image";
+        } else if (fieldName === "videos") {
+          const resolvedMimeType = resolveVideoMimeType(originalName, mimeType);
 
-        if (!mimeType.startsWith("image/")) {
+          if (!resolvedMimeType) {
+            fileStream.resume();
+            fail(new Error(`Unsupported file type for ${originalName}`));
+            return;
+          }
+
+          assetType = "video";
+          contentType = resolvedMimeType;
+        } else {
           fileStream.resume();
-          fail(new Error(`Unsupported file type for ${originalName}`));
           return;
         }
 
         fileCount += 1;
-        const currentImageIndex = imageIndex;
-        imageIndex += 1;
+        const currentAssetIndex = assetIndex;
+        assetIndex += 1;
 
         const objectKey = safeObjectName(originalName);
         const uploadTask = uploadObjectStream({
           objectName: objectKey,
           stream: fileStream,
-          contentType: mimeType
+          contentType
         })
           .then(() => {
-            uploaded[currentImageIndex] = {
-              type: "image",
+            uploaded[currentAssetIndex] = {
+              type: assetType,
               originalName,
               objectKey,
-              mimeType,
+              mimeType: contentType,
               url: buildAssetUrl(objectKey)
             };
           })
@@ -3059,17 +3083,26 @@ app.post("/upload", requireToken, async (req, res, next) => {
           await Promise.all(uploadTasks);
 
           if (fileCount === 0) {
-            return reject(new Error("At least one image file is required in the images field"));
+            return reject(new Error("At least one image or video file is required in the images or videos field"));
           }
 
           await saveBatchManifest(batchId, uploaded);
 
+          const images = uploaded.filter((asset) => asset.type === "image");
+          const videos = uploaded.filter((asset) => asset.type === "video");
+          const message = images.length > 0 && videos.length > 0
+            ? "Images and videos uploaded successfully"
+            : videos.length > 0
+              ? "Videos uploaded successfully"
+              : "Images uploaded successfully";
+
           resolve({
-            message: "Images uploaded successfully",
+            message,
             batchId,
             batchUrl: buildBatchUrl(batchId),
             batchJsonUrl: `${buildBatchUrl(batchId)}/json`,
-            images: uploaded
+            images,
+            videos
           });
         } catch (error) {
           fail(error);
@@ -3081,7 +3114,7 @@ app.post("/upload", requireToken, async (req, res, next) => {
 
     return res.status(201).json(result);
   } catch (error) {
-    if (error.message === "At least one image file is required in the images field") {
+    if (error.message === "At least one image or video file is required in the images or videos field") {
       return res.status(400).json({
         error: error.message
       });

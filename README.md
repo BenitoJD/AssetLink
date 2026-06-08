@@ -83,7 +83,7 @@ Expected response shape:
 
 ## Upload Images
 
-Use `POST /upload` with multipart form data. The file field must be named `images`.
+Use `POST /upload` with multipart form data. File fields can be named `images`, `videos`, or both in the same request.
 
 ```bash
 curl -X POST http://localhost:3000/upload \
