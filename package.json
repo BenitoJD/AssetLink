@@ -5,7 +5,9 @@
   "main": "src/server.js",
   "scripts": {
     "start": "node src/server.js",
-    "dev": "node --watch src/server.js"
+    "dev": "node --watch src/server.js",
+    "test": "node --test test/unit.test.js test/integration.test.js",
+    "test:prod": "NODE_TLS_REJECT_UNAUTHORIZED=0 RUN_PROD_SMOKE=1 node --test test/smoke-prod.test.js"
   },
   "dependencies": {
     "busboy": "^1.6.0",

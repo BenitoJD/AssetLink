@@ -86,8 +86,16 @@ function parseByteRange(rangeHeader, size) {
   }
 
   const [, startPart, endPart] = match;
-  let start = startPart === "" ? Math.max(size - Number(endPart), 0) : Number(startPart);
-  let end = endPart === "" ? size - 1 : Number(endPart);
+  let start;
+  let end;
+
+  if (startPart === "" && endPart !== "") {
+    start = Math.max(size - Number(endPart), 0);
+    end = size - 1;
+  } else {
+    start = Number(startPart);
+    end = endPart === "" ? size - 1 : Number(endPart);
+  }
 
   if (!Number.isFinite(start) || !Number.isFinite(end) || start < 0 || end < start || start >= size) {
     return { invalid: true, size };
@@ -2151,6 +2159,52 @@ function buildMediaBatchHtml(manifest, mediaItems, { singular, plural, emptyIcon
     ? escapeHtml(mediaItems[0].originalName || `Uploaded ${singular}`)
     : "";
 
+  const buildShareGroup = (items, groupLabel, galleryLead, galleryAction, openLabel) => {
+    if (!items.length) {
+      return "";
+    }
+
+    const fileLinks = items
+      .map((item) => {
+        const mediaUrl = buildAssetUrl(item.objectKey);
+        const safeName = escapeHtml(item.originalName || `Uploaded ${singular}`);
+
+        return `
+          <li class="share-item">
+            <span class="share-pill">${safeName}</span>
+            <a href="${mediaUrl}" class="share-open" target="_blank" rel="noopener noreferrer">${openLabel}</a>
+          </li>
+        `;
+      })
+      .join("");
+
+    return `
+      <section class="share-group">
+        <h2 class="share-heading">${escapeHtml(groupLabel)}</h2>
+        <ul class="share-list">
+          <li class="share-item share-item-gallery">
+            <span class="share-lead">${escapeHtml(galleryLead)}:</span>
+            <a href="${batchUrl}" class="share-open" target="_blank" rel="noopener noreferrer">${escapeHtml(galleryAction)}</a>
+          </li>
+          ${fileLinks}
+        </ul>
+      </section>
+    `;
+  };
+
+  const imageItems = mediaItems.filter((item) => item.type === "image");
+  const videoItems = mediaItems.filter((item) => item.type === "video");
+  const shareLinksPanel = totalItems > 0
+    ? `
+        <aside class="share-panel" aria-label="Share links">
+          ${buildShareGroup(imageItems, "Images", "Screenshot gallery", "View uploaded screenshots", "Open image")}
+          ${buildShareGroup(videoItems, "Videos", "Video gallery", "View uploaded videos", "Open video")}
+        </aside>
+      `
+    : "";
+
+  const mediaUrls = mediaItems.map((item) => buildAssetUrl(item.objectKey));
+
   return `<!doctype html>
   <html lang="en">
     <head>
@@ -2333,11 +2387,17 @@ function buildMediaBatchHtml(manifest, mediaItems, { singular, plural, emptyIcon
           overflow: hidden;
           text-overflow: ellipsis;
         }
+        .theater-bar .theater-open {
+          flex-shrink: 0;
+          font-size: 13px;
+          white-space: nowrap;
+        }
         .theater-bar .counter {
           font-size: 13px;
           color: var(--text-muted);
           white-space: nowrap;
           padding-right: 8px;
+          flex-shrink: 0;
         }
         .stage-wrap {
           flex: 1;
@@ -2453,6 +2513,55 @@ function buildMediaBatchHtml(manifest, mediaItems, { singular, plural, emptyIcon
         .empty-title { font-size: 22px; font-weight: 600; margin-bottom: 8px; }
         .empty-desc { font-size: 15px; color: var(--text-muted); max-width: 320px; }
 
+        .share-panel {
+          max-width: 720px;
+          margin: 0 auto;
+          padding: 8px 20px calc(32px + var(--safe-bottom));
+        }
+        .share-group + .share-group { margin-top: 28px; }
+        .share-heading {
+          font-size: 22px;
+          font-weight: 600;
+          letter-spacing: -0.02em;
+          padding-bottom: 10px;
+          border-bottom: 1px solid var(--border);
+          margin-bottom: 14px;
+        }
+        .share-list {
+          list-style: none;
+          display: flex;
+          flex-direction: column;
+          gap: 10px;
+        }
+        .share-item {
+          display: flex;
+          flex-wrap: wrap;
+          align-items: center;
+          gap: 8px 12px;
+        }
+        .share-lead { color: var(--text-muted); font-size: 15px; }
+        .share-pill {
+          display: inline-flex;
+          align-items: center;
+          padding: 6px 12px;
+          border-radius: 999px;
+          background: var(--surface);
+          border: 1px solid var(--border);
+          font-size: 13px;
+          color: var(--text);
+          max-width: 100%;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+        }
+        .share-open {
+          color: var(--accent);
+          text-decoration: none;
+          font-size: 15px;
+          font-weight: 500;
+        }
+        .share-open:hover { text-decoration: underline; }
+
         .menu-backdrop {
           position: fixed;
           inset: 0;
@@ -2531,6 +2640,7 @@ function buildMediaBatchHtml(manifest, mediaItems, { singular, plural, emptyIcon
             ${gridTiles}
           </div>
         </div>
+        ${shareLinksPanel}
 
         <div class="theater" data-theater aria-hidden="true" role="dialog" aria-modal="true" aria-label="Media viewer">
           <div class="theater-bar">
@@ -2538,6 +2648,7 @@ function buildMediaBatchHtml(manifest, mediaItems, { singular, plural, emptyIcon
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true"><path d="M18 6L6 18M6 6l12 12"/></svg>
             </button>
             <span class="caption" data-theater-caption>${firstName}</span>
+            <a href="${totalItems > 0 ? buildAssetUrl(mediaItems[0].objectKey) : "#"}" class="share-open theater-open" data-theater-open target="_blank" rel="noopener noreferrer">Open in new tab</a>
             <span class="counter" data-theater-counter>1 / ${totalItems}</span>
           </div>
           <div class="stage-wrap" data-stage-wrap>
@@ -2557,7 +2668,8 @@ function buildMediaBatchHtml(manifest, mediaItems, { singular, plural, emptyIcon
 
       <div class="menu-backdrop" data-menu aria-hidden="true">
         <div class="menu-sheet" role="menu">
-          <a href="${batchJsonUrl}" class="menu-item" target="_blank" rel="noreferrer" role="menuitem">View JSON</a>
+          <a href="${batchUrl}" class="menu-item" target="_blank" rel="noopener noreferrer" role="menuitem">Open gallery in new tab</a>
+          <a href="${batchJsonUrl}" class="menu-item" target="_blank" rel="noopener noreferrer" role="menuitem">View JSON</a>
           <button type="button" class="menu-item" data-print role="menuitem">Print Gallery</button>
         </div>
       </div>
@@ -2568,6 +2680,7 @@ function buildMediaBatchHtml(manifest, mediaItems, { singular, plural, emptyIcon
             name: item.originalName || `Uploaded ${singular}`,
             type: item.type
           })))};
+          const MEDIA_URLS = ${JSON.stringify(mediaUrls)};
           const HAS_VIDEO = ${hasVideo ? "true" : "false"};
           const TOTAL = ${totalItems};
 
@@ -2601,6 +2714,7 @@ function buildMediaBatchHtml(manifest, mediaItems, { singular, plural, emptyIcon
           const nextBtn = theater.querySelector('[data-theater-next]');
           const stageWrap = theater.querySelector('[data-stage-wrap]');
           const filmstrip = theater.querySelector('[data-filmstrip]');
+          const theaterOpen = theater.querySelector('[data-theater-open]');
           let currentIndex = 0;
           let touchStartX = 0;
 
@@ -2644,6 +2758,9 @@ function buildMediaBatchHtml(manifest, mediaItems, { singular, plural, emptyIcon
             }
             if (counter) {
               counter.textContent = (currentIndex + 1) + ' / ' + TOTAL;
+            }
+            if (theaterOpen && MEDIA_URLS[currentIndex]) {
+              theaterOpen.href = MEDIA_URLS[currentIndex];
             }
             if (prevBtn) {
               prevBtn.disabled = TOTAL <= 1;
@@ -3314,15 +3431,28 @@ app.use((error, req, res, next) => {
   });
 });
 
-ensureBucket()
-  .then(() => {
-    const { protocol, server } = createListeningServer();
+module.exports = {
+  app,
+  parseByteRange,
+  escapeHtml,
+  isSupportedTextFile,
+  resolveVideoMimeType,
+  normalizeManifestAssets,
+  buildMediaBatchHtml,
+  buildBatchHtml
+};
 
-    server.listen(config.port, () => {
-      console.log(`AssetLink listening on ${protocol} port ${config.port}`);
+if (require.main === module) {
+  ensureBucket()
+    .then(() => {
+      const { protocol, server } = createListeningServer();
+
+      server.listen(config.port, () => {
+        console.log(`AssetLink listening on ${protocol} port ${config.port}`);
+      });
+    })
+    .catch((error) => {
+      console.error("Failed to start server:", error);
+      process.exit(1);
     });
-  })
-  .catch((error) => {
-    console.error("Failed to start server:", error);
-    process.exit(1);
-  });
+}
