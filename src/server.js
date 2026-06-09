@@ -2088,868 +2088,666 @@ async function buildBatchHtml(manifest) {
   });
 }
 
-function capitalizeLabel(value) {
-  return value.charAt(0).toUpperCase() + value.slice(1);
-}
-
 function buildMediaBatchHtml(manifest, mediaItems, { singular, plural, emptyIcon, hasVideo = false }) {
   const totalItems = mediaItems.length;
-  const label = capitalizeLabel(singular);
   const batchId = escapeHtml(manifest.batchId);
   const batchUrl = buildBatchUrl(manifest.batchId);
   const batchJsonUrl = `${batchUrl}/json`;
-  const batchSummary = totalItems > 1
-    ? `Browse the upload one ${singular} at a time.`
-    : totalItems === 1
-      ? "Browse the upload at full size."
-      : `This batch does not contain any ${plural} yet.`;
+  const countLabel = totalItems === 1 ? `1 ${singular}` : `${totalItems} ${plural}`;
 
-  const mediaSlides = mediaItems
+  const gridTiles = mediaItems
     .map((item, index) => {
       const mediaUrl = buildAssetUrl(item.objectKey);
       const safeName = escapeHtml(item.originalName || `Uploaded ${singular}`);
-      const slideNumber = index + 1;
       const isVideo = item.type === "video";
-      const itemLabel = capitalizeLabel(item.type === "video" ? "video" : "image");
-      const mediaElement = isVideo
-        ? `<video src="${mediaUrl}" controls preload="metadata" class="slide-media slide-video" playsinline></video>`
-        : `<img src="${mediaUrl}" alt="${safeName}" loading="${index === 0 ? "eager" : "lazy"}" class="slide-media slide-image" />`;
-      const openLabel = isVideo ? "Open original" : "Open full size";
+      const thumbMedia = isVideo
+        ? `<video src="${mediaUrl}" muted playsinline preload="metadata" class="tile-media"></video><span class="tile-badge" aria-hidden="true">▶</span>`
+        : `<img src="${mediaUrl}" alt="" loading="${index < 6 ? "eager" : "lazy"}" class="tile-media" />`;
 
       return `
-        <figure class="slide${index === 0 ? " is-active" : ""}" data-carousel-slide data-carousel-slide-index="${index}" data-slide-label="${itemLabel}" aria-label="${itemLabel} ${slideNumber} of ${totalItems}">
-          <div class="slide-frame">
-            ${mediaElement}
-          </div>
-          <figcaption class="slide-caption">
-            <div class="slide-copy">
-              <p class="slide-kicker">${itemLabel} ${slideNumber} of ${totalItems}</p>
-              <h2 class="slide-title">${safeName}</h2>
-            </div>
-            <a href="${mediaUrl}" target="_blank" rel="noreferrer" class="open-original">${openLabel}</a>
-          </figcaption>
+        <button type="button" class="grid-tile${isVideo ? " is-video" : ""}" data-open-index="${index}" aria-label="Open ${safeName}">
+          <span class="tile-frame">${thumbMedia}</span>
+          <span class="tile-name">${safeName}</span>
+        </button>
+      `;
+    })
+    .join("");
+
+  const theaterSlides = mediaItems
+    .map((item, index) => {
+      const mediaUrl = buildAssetUrl(item.objectKey);
+      const safeName = escapeHtml(item.originalName || `Uploaded ${singular}`);
+      const isVideo = item.type === "video";
+      const mediaElement = isVideo
+        ? `<video src="${mediaUrl}" controls preload="metadata" class="stage-media" playsinline data-stage-video></video>`
+        : `<img src="${mediaUrl}" alt="${safeName}" class="stage-media" data-stage-image />`;
+
+      return `
+        <figure class="stage-slide${index === 0 ? " is-active" : ""}" data-stage-slide data-index="${index}" ${index === 0 ? "" : 'hidden'}>
+          ${mediaElement}
         </figure>
       `;
     })
     .join("");
 
-  const carouselControls = totalItems > 1 ? `
-          <div class="carousel-controls" aria-label="Carousel navigation">
-            <button type="button" class="carousel-control" data-carousel-prev aria-label="Previous ${singular}">
-              <span aria-hidden="true">&larr;</span>
-            </button>
-            <button type="button" class="carousel-control" data-carousel-next aria-label="Next ${singular}">
-              <span aria-hidden="true">&rarr;</span>
-            </button>
-          </div>
-  ` : "";
+  const filmstripThumbs = mediaItems
+    .map((item, index) => {
+      const mediaUrl = buildAssetUrl(item.objectKey);
+      const safeName = escapeHtml(item.originalName || `Uploaded ${singular}`);
+      const isVideo = item.type === "video";
+      const thumb = isVideo
+        ? `<video src="${mediaUrl}" muted playsinline preload="metadata"></video><span class="film-badge">▶</span>`
+        : `<img src="${mediaUrl}" alt="" loading="lazy" />`;
 
-  const carouselDots = totalItems > 1 ? `
-            <div class="carousel-dots" aria-label="Choose a ${singular}">
-              ${mediaItems
-                .map((_, index) => {
-                  const isActive = index === 0 ? " is-active" : "";
-                  const ariaCurrent = index === 0 ? "true" : "false";
+      return `
+        <button type="button" class="film-thumb${index === 0 ? " is-active" : ""}${isVideo ? " is-video" : ""}" data-film-index="${index}" aria-label="${safeName}" aria-current="${index === 0 ? "true" : "false"}">
+          ${thumb}
+        </button>
+      `;
+    })
+    .join("");
 
-                  return `
-                <button type="button" class="carousel-dot${isActive}" data-carousel-dot data-target-index="${index}" aria-label="Go to ${singular} ${index + 1}" aria-current="${ariaCurrent}"></button>
-              `;
-                })
-                .join("")}
-            </div>
-  ` : "";
+  const firstName = totalItems > 0
+    ? escapeHtml(mediaItems[0].originalName || `Uploaded ${singular}`)
+    : "";
 
   return `<!doctype html>
   <html lang="en">
     <head>
       <meta charset="utf-8" />
-      <meta name="viewport" content="width=device-width, initial-scale=1" />
-      <title>AssetLink Batch ${batchId}</title>
+      <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+      <meta name="theme-color" content="#000000" />
+      <meta name="apple-mobile-web-app-capable" content="yes" />
+      <title>${totalItems > 0 ? firstName : `Batch ${batchId}`} · AssetLink</title>
       <style>
         :root {
-          color-scheme: light;
-          --bg-primary: #f7f2eb;
-          --bg-secondary: rgba(255, 255, 255, 0.84);
-          --bg-surface: #ffffff;
-          --text-primary: #2c2721;
-          --text-secondary: #6f665a;
-          --accent: #b8784b;
-          --accent-strong: #8f5330;
-          --border: rgba(44, 39, 33, 0.12);
-          --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.05);
-          --shadow-md: 0 4px 16px rgba(0, 0, 0, 0.08);
-          --shadow-lg: 0 18px 40px rgba(0, 0, 0, 0.12);
-          --radius: 16px;
-          --radius-lg: 22px;
-          --radius-xl: 30px;
-          --transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-          --page-gutter: clamp(12px, 2.4vw, 24px);
-          --section-gap: clamp(18px, 3vw, 32px);
-          --slide-gap: clamp(12px, 2vw, 18px);
-          --slide-min-height: min(82vh, 900px);
-          --slide-frame-min-height: clamp(320px, 62vh, 760px);
-          --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-          --font-serif: 'Cormorant Garamond', 'Times New Roman', serif;
+          color-scheme: dark;
+          --bg: #000000;
+          --surface: #1c1c1e;
+          --surface-elevated: #2c2c2e;
+          --text: #f5f5f7;
+          --text-muted: rgba(245, 245, 247, 0.55);
+          --accent: #0a84ff;
+          --border: rgba(255, 255, 255, 0.1);
+          --radius: 12px;
+          --radius-lg: 18px;
+          --ease: cubic-bezier(0.25, 0.1, 0.25, 1);
+          --safe-top: env(safe-area-inset-top, 0px);
+          --safe-bottom: env(safe-area-inset-bottom, 0px);
+          --bar-height: 52px;
+          --filmstrip-height: 72px;
         }
-        * {
-          margin: 0;
-          padding: 0;
-          box-sizing: border-box;
-        }
-        html {
-          font-size: 16px;
-          scroll-behavior: smooth;
-        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        html { -webkit-text-size-adjust: 100%; }
         body {
-          margin: 0;
-          font-family: var(--font-sans);
-          overflow-x: hidden;
-          background:
-            radial-gradient(circle at top left, rgba(184, 120, 75, 0.16), transparent 26%),
-            radial-gradient(circle at top right, rgba(143, 83, 48, 0.08), transparent 20%),
-            linear-gradient(180deg, #fdf8f3 0%, var(--bg-primary) 100%);
-          color: var(--text-primary);
-          line-height: 1.6;
-        }
-        main {
-          max-width: 1380px;
-          margin: 0 auto;
-          padding: clamp(20px, 4vw, 40px) var(--page-gutter) clamp(28px, 5vw, 56px);
+          font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", system-ui, sans-serif;
+          background: var(--bg);
+          color: var(--text);
+          line-height: 1.4;
           min-height: 100vh;
           min-height: 100dvh;
+          -webkit-font-smoothing: antialiased;
         }
-        .header {
-          text-align: center;
-          margin-bottom: var(--section-gap);
-          padding-bottom: clamp(18px, 2vw, 22px);
+        button { font: inherit; color: inherit; cursor: pointer; border: none; background: none; }
+        a { color: inherit; }
+        :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+        .app-bar {
+          position: sticky;
+          top: 0;
+          z-index: 10;
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 12px;
+          height: calc(var(--bar-height) + var(--safe-top));
+          padding: var(--safe-top) 16px 0;
+          background: rgba(0, 0, 0, 0.72);
+          backdrop-filter: saturate(180%) blur(20px);
+          -webkit-backdrop-filter: saturate(180%) blur(20px);
           border-bottom: 1px solid var(--border);
         }
-        h1 {
-          font-family: var(--font-serif);
-          font-size: clamp(2.4rem, 5vw, 3.6rem);
+        .app-bar-start { display: flex; align-items: baseline; gap: 10px; min-width: 0; }
+        .app-title {
+          font-size: 17px;
           font-weight: 600;
-          color: var(--text-primary);
-          margin-bottom: 12px;
-          letter-spacing: 0;
-          line-height: 1.05;
-          overflow-wrap: anywhere;
-          word-break: break-word;
-          text-wrap: balance;
-        }
-        .batch-info {
-          display: flex;
-          flex-direction: row;
-          flex-wrap: wrap;
-          align-items: center;
-          justify-content: center;
-          gap: clamp(8px, 1.5vw, 10px);
-          color: var(--text-secondary);
-          font-size: clamp(0.95rem, 1.2vw, 1rem);
-          margin-bottom: 10px;
-        }
-        .batch-id {
-          font-family: var(--font-sans);
-          font-weight: 500;
-          background: var(--bg-surface);
-          padding: 8px 16px;
-          border-radius: 50px;
-          border: 1px solid var(--border);
-          font-size: 0.9rem;
-        }
-        .batch-summary {
-          max-width: 760px;
-          margin: 0 auto;
-          color: var(--text-secondary);
-          font-size: clamp(0.92rem, 1.2vw, 0.98rem);
-          line-height: 1.55;
-        }
-        .actions {
-          margin: 20px 0 6px;
-          display: flex;
-          flex-wrap: wrap;
-          align-items: center;
-          justify-content: center;
-          gap: clamp(10px, 1.6vw, 12px);
-        }
-        .actions a,
-        .actions button {
-          appearance: none;
-          border: 1px solid var(--border);
-          background: var(--bg-secondary);
-          color: var(--accent);
-          text-decoration: none;
-          font-weight: 500;
-          display: inline-flex;
-          align-items: center;
-          justify-content: center;
-          gap: 8px;
-          min-height: 44px;
-          padding: 10px 16px;
-          border-radius: 999px;
-          box-shadow: var(--shadow-sm);
-          transition: var(--transition);
-          cursor: pointer;
-          font: inherit;
-          min-width: min(100%, 220px);
-        }
-        .actions a:hover,
-        .actions button:hover {
-          color: var(--accent-strong);
-          border-color: rgba(184, 120, 75, 0.45);
-          background: var(--bg-surface);
-          box-shadow: var(--shadow-md);
-          transform: translateY(-2px);
-        }
-        .actions button:focus-visible,
-        .carousel-control:focus-visible,
-        .carousel-dot:focus-visible,
-        .open-original:focus-visible {
-          outline: 2px solid rgba(184, 120, 75, 0.45);
-          outline-offset: 2px;
-        }
-        .carousel {
-          margin-top: var(--section-gap);
-          position: relative;
-        }
-        .carousel-shell {
-          position: relative;
-          background: var(--bg-secondary);
-          border: 1px solid var(--border);
-          border-radius: clamp(20px, 3vw, var(--radius-xl));
-          box-shadow: var(--shadow-lg);
-          overflow: hidden;
-          backdrop-filter: blur(14px);
-        }
-        .carousel-viewport {
-          overflow-x: auto;
-          overflow-y: hidden;
-          scroll-snap-type: x mandatory;
-          scroll-behavior: smooth;
-          -webkit-overflow-scrolling: touch;
-          overscroll-behavior-x: contain;
-          scrollbar-width: none;
-        }
-        .carousel-viewport::-webkit-scrollbar {
-          display: none;
-        }
-        .carousel-track {
-          display: flex;
-          align-items: stretch;
-        }
-        .slide {
-          flex: 0 0 100%;
-          padding: clamp(12px, 2vw, 28px);
-          display: flex;
-          flex-direction: column;
-          gap: var(--slide-gap);
-          min-height: var(--slide-min-height);
-          scroll-snap-align: start;
-          scroll-snap-stop: always;
-        }
-        .slide-frame {
-          position: relative;
-          flex: 1 1 auto;
-          min-height: var(--slide-frame-min-height);
-          padding: clamp(10px, 1.8vw, 18px);
-          border-radius: clamp(16px, 2vw, calc(var(--radius-xl) - 10px));
-          background:
-            linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(247, 242, 234, 0.96));
-          border: 1px solid rgba(44, 39, 33, 0.08);
-          box-shadow:
-            inset 0 1px 0 rgba(255, 255, 255, 0.8),
-            var(--shadow-md);
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          overflow: hidden;
-        }
-        .slide-frame::after {
-          content: "";
-          position: absolute;
-          inset: 0;
-          border-radius: inherit;
-          pointer-events: none;
-          box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.5);
-        }
-        .slide-image,
-        .slide-video {
-          width: 100%;
-          height: 100%;
-          object-fit: contain;
-          display: block;
-          border-radius: clamp(12px, 1.5vw, calc(var(--radius-xl) - 16px));
-          background: transparent;
-        }
-        .slide-video {
-          background: #000;
-        }
-        .slide.is-active .slide-frame {
-          border-color: rgba(184, 120, 75, 0.32);
-          box-shadow:
-            inset 0 1px 0 rgba(255, 255, 255, 0.8),
-            0 16px 36px rgba(44, 39, 33, 0.14);
-        }
-        .slide-caption {
-          display: flex;
-          align-items: flex-end;
-          justify-content: space-between;
-          gap: clamp(12px, 1.8vw, 16px);
-          padding: 0 6px 4px;
-        }
-        .slide-copy {
-          min-width: 0;
-        }
-        .slide-kicker {
-          margin-bottom: 6px;
-          font-size: 0.78rem;
-          text-transform: uppercase;
-          letter-spacing: 0.18em;
-          color: var(--accent);
-        }
-        .slide-title {
-          font-family: var(--font-serif);
-          font-size: clamp(1.2rem, 2.2vw, 2rem);
-          font-weight: 600;
-          line-height: 1.15;
-          word-break: break-word;
-          color: var(--text-primary);
-        }
-        .open-original {
-          flex: 0 0 auto;
-          color: var(--accent-strong);
-          text-decoration: none;
-          font-weight: 600;
+          letter-spacing: -0.02em;
           white-space: nowrap;
-          padding: 10px 14px;
-          border-radius: 999px;
-          border: 1px solid rgba(184, 120, 75, 0.18);
-          background: rgba(184, 120, 75, 0.1);
-          box-shadow: var(--shadow-sm);
-          transition: var(--transition);
         }
-        .open-original:hover {
-          transform: translateY(-1px);
-          box-shadow: var(--shadow-md);
+        .app-count {
+          font-size: 13px;
+          color: var(--text-muted);
+          white-space: nowrap;
         }
-        .carousel-controls {
-          position: absolute;
-          inset: 50% 0 auto;
-          transform: translateY(-50%);
-          display: flex;
-          justify-content: space-between;
-          pointer-events: none;
-          padding: 0 clamp(8px, 2vw, 14px);
-        }
-        .carousel-control {
-          pointer-events: auto;
+        .app-actions { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
+        .icon-btn {
           display: grid;
           place-items: center;
-          width: clamp(42px, 4vw, 50px);
-          height: clamp(42px, 4vw, 50px);
-          border: 1px solid rgba(255, 255, 255, 0.55);
-          border-radius: 999px;
-          background: rgba(255, 255, 255, 0.92);
-          color: var(--text-primary);
+          width: 36px;
+          height: 36px;
+          border-radius: 50%;
+          color: var(--text);
+          transition: background 0.2s var(--ease);
+        }
+        .icon-btn:hover { background: var(--surface-elevated); }
+        .icon-btn svg { width: 18px; height: 18px; }
+
+        .gallery {
+          padding: 12px 12px calc(24px + var(--safe-bottom));
+        }
+        .gallery-grid {
+          display: grid;
+          grid-template-columns: repeat(auto-fill, minmax(min(100%, 160px), 1fr));
+          gap: 3px;
+        }
+        @media (min-width: 640px) {
+          .gallery { padding: 16px 20px calc(32px + var(--safe-bottom)); }
+          .gallery-grid {
+            grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+            gap: 4px;
+          }
+        }
+        @media (min-width: 1200px) {
+          .gallery-grid { grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); }
+        }
+
+        .grid-tile {
+          display: flex;
+          flex-direction: column;
+          gap: 0;
+          text-align: left;
+          border-radius: var(--radius);
           overflow: hidden;
-          transition: var(--transition);
-          box-shadow: var(--shadow-lg);
-          cursor: pointer;
+          transition: transform 0.25s var(--ease), opacity 0.25s var(--ease);
         }
-        .carousel-control:hover {
-          background: var(--bg-surface);
-          transform: scale(1.04);
+        .grid-tile:hover { transform: scale(1.02); z-index: 1; }
+        .grid-tile:active { transform: scale(0.98); opacity: 0.85; }
+        .tile-frame {
+          position: relative;
+          display: block;
+          aspect-ratio: 1;
+          background: var(--surface);
+          overflow: hidden;
         }
-        .carousel-control:disabled {
-          opacity: 0.4;
-          cursor: default;
-          transform: none;
+        .tile-media {
+          width: 100%;
+          height: 100%;
+          object-fit: cover;
+          display: block;
+          pointer-events: none;
         }
-        .carousel-footer {
+        .tile-badge {
+          position: absolute;
+          inset: 0;
+          display: grid;
+          place-items: center;
+          font-size: 28px;
+          color: #fff;
+          text-shadow: 0 2px 12px rgba(0, 0, 0, 0.5);
+          background: rgba(0, 0, 0, 0.15);
+        }
+        .tile-name {
+          display: none;
+          padding: 8px 10px;
+          font-size: 12px;
+          color: var(--text-muted);
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
+        }
+        @media (min-width: 640px) {
+          .tile-name { display: block; }
+        }
+
+        .theater {
+          position: fixed;
+          inset: 0;
+          z-index: 100;
+          display: flex;
+          flex-direction: column;
+          background: #000;
+          opacity: 0;
+          visibility: hidden;
+          transition: opacity 0.35s var(--ease), visibility 0.35s;
+        }
+        .theater.is-open {
+          opacity: 1;
+          visibility: visible;
+        }
+        .theater-bar {
+          flex-shrink: 0;
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 12px;
+          height: calc(var(--bar-height) + var(--safe-top));
+          padding: var(--safe-top) 8px 0 16px;
+          background: linear-gradient(180deg, rgba(0,0,0,0.7) 0%, transparent 100%);
+        }
+        .theater-bar .caption {
+          flex: 1;
+          min-width: 0;
+          font-size: 15px;
+          font-weight: 500;
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
+        }
+        .theater-bar .counter {
+          font-size: 13px;
+          color: var(--text-muted);
+          white-space: nowrap;
+          padding-right: 8px;
+        }
+        .stage-wrap {
+          flex: 1;
+          position: relative;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          min-height: 0;
+          touch-action: pan-y pinch-zoom;
+        }
+        .stage-slide {
+          position: absolute;
+          inset: 0;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          padding: 0 48px;
+          margin: 0;
+        }
+        .stage-slide[hidden] { display: none; }
+        .stage-media {
+          max-width: 100%;
+          max-height: 100%;
+          width: auto;
+          height: auto;
+          object-fit: contain;
+          border-radius: 4px;
+        }
+        video.stage-media { background: #000; }
+        .stage-nav {
+          position: absolute;
+          top: 50%;
+          transform: translateY(-50%);
+          z-index: 2;
+          display: grid;
+          place-items: center;
+          width: 44px;
+          height: 44px;
+          border-radius: 50%;
+          background: rgba(60, 60, 67, 0.6);
+          backdrop-filter: blur(10px);
+          color: #fff;
+          font-size: 22px;
+          line-height: 1;
+          transition: background 0.2s, transform 0.2s;
+        }
+        .stage-nav:hover { background: rgba(80, 80, 87, 0.85); }
+        .stage-nav:disabled { opacity: 0.25; pointer-events: none; }
+        .stage-nav.prev { left: 12px; }
+        .stage-nav.next { right: 12px; }
+        @media (max-width: 640px) {
+          .stage-slide { padding: 0 8px; }
+          .stage-nav { width: 36px; height: 36px; font-size: 18px; }
+          .stage-nav.prev { left: 4px; }
+          .stage-nav.next { right: 4px; }
+        }
+        .filmstrip {
+          flex-shrink: 0;
+          display: flex;
+          gap: 6px;
+          padding: 10px 16px calc(10px + var(--safe-bottom));
+          overflow-x: auto;
+          scrollbar-width: none;
+          background: linear-gradient(0deg, rgba(0,0,0,0.85) 0%, transparent 100%);
+          -webkit-overflow-scrolling: touch;
+        }
+        .filmstrip::-webkit-scrollbar { display: none; }
+        .film-thumb {
+          position: relative;
+          flex: 0 0 56px;
+          width: 56px;
+          height: 56px;
+          border-radius: 8px;
+          overflow: hidden;
+          opacity: 0.45;
+          border: 2px solid transparent;
+          transition: opacity 0.2s, border-color 0.2s, transform 0.2s;
+        }
+        .film-thumb.is-active {
+          opacity: 1;
+          border-color: #fff;
+          transform: scale(1.05);
+        }
+        .film-thumb img,
+        .film-thumb video {
+          width: 100%;
+          height: 100%;
+          object-fit: cover;
+          display: block;
+          pointer-events: none;
+        }
+        .film-badge {
+          position: absolute;
+          inset: 0;
+          display: grid;
+          place-items: center;
+          font-size: 14px;
+          color: #fff;
+          background: rgba(0, 0, 0, 0.3);
+        }
+        .film-thumb:only-child { display: none; }
+
+        .empty {
           display: flex;
           flex-direction: column;
           align-items: center;
-          gap: clamp(10px, 1.8vw, 14px);
-          margin-top: clamp(14px, 2vw, 18px);
-        }
-        .carousel-status {
-          display: inline-flex;
-          align-items: center;
-          gap: 8px;
-          padding: 8px 14px;
-          border-radius: 999px;
-          border: 1px solid var(--border);
-          background: var(--bg-secondary);
-          box-shadow: var(--shadow-sm);
-          color: var(--text-secondary);
-          font-weight: 500;
-          font-size: clamp(0.9rem, 1.1vw, 1rem);
-        }
-        .carousel-dots {
-          display: flex;
           justify-content: center;
-          flex-wrap: wrap;
-          gap: clamp(8px, 1.5vw, 10px);
-          max-width: 100%;
-        }
-        .carousel-dot {
-          width: clamp(9px, 1vw, 10px);
-          height: clamp(9px, 1vw, 10px);
-          border: none;
-          border-radius: 999px;
-          background: rgba(44, 39, 33, 0.22);
-          padding: 0;
-          cursor: pointer;
-          transition: var(--transition);
-        }
-        .carousel-dot.is-active {
-          width: clamp(22px, 2.4vw, 28px);
-          background: var(--accent);
-        }
-        .carousel-dot:hover {
-          background: var(--accent-strong);
-        }
-        .empty {
-          margin-top: var(--section-gap);
-          padding: clamp(44px, 8vw, 64px) 24px;
+          min-height: calc(100dvh - var(--bar-height));
+          padding: 40px 24px;
           text-align: center;
-          background: var(--bg-secondary);
-          border: 2px dashed var(--border);
-          border-radius: var(--radius-xl);
-          box-shadow: var(--shadow-sm);
-          color: var(--text-secondary);
         }
-        .empty-icon {
-          font-size: 3rem;
-          margin-bottom: 16px;
-          color: var(--accent);
-          opacity: 0.7;
+        .empty-icon { font-size: 48px; margin-bottom: 16px; opacity: 0.6; }
+        .empty-title { font-size: 22px; font-weight: 600; margin-bottom: 8px; }
+        .empty-desc { font-size: 15px; color: var(--text-muted); max-width: 320px; }
+
+        .menu-backdrop {
+          position: fixed;
+          inset: 0;
+          z-index: 50;
+          background: rgba(0, 0, 0, 0.4);
+          opacity: 0;
+          visibility: hidden;
+          transition: opacity 0.25s, visibility 0.25s;
         }
-        .empty-title {
-          font-family: var(--font-serif);
-          font-size: 1.35rem;
-          font-weight: 600;
-          margin-bottom: 8px;
-          color: var(--text-primary);
+        .menu-backdrop.is-open { opacity: 1; visibility: visible; }
+        .menu-sheet {
+          position: fixed;
+          left: 50%;
+          bottom: 0;
+          z-index: 51;
+          width: min(100%, 400px);
+          transform: translate(-50%, 100%);
+          background: var(--surface);
+          border-radius: 14px 14px 0 0;
+          padding: 8px 8px calc(8px + var(--safe-bottom));
+          transition: transform 0.35s var(--ease);
         }
-        .empty-description {
-          font-size: clamp(0.92rem, 1.1vw, 0.95rem);
-          line-height: 1.55;
-          max-width: 460px;
-          margin: 0 auto;
+        .menu-backdrop.is-open .menu-sheet { transform: translate(-50%, 0); }
+        .menu-item {
+          display: flex;
+          align-items: center;
+          gap: 12px;
+          width: 100%;
+          padding: 14px 16px;
+          border-radius: 10px;
+          font-size: 17px;
+          text-decoration: none;
+          transition: background 0.15s;
         }
-        @keyframes fadeIn {
-          from {
-            opacity: 0;
-            transform: translateY(18px);
-          }
-          to {
-            opacity: 1;
-            transform: translateY(0);
-          }
-        }
-        .header,
-        .actions,
-        .carousel,
-        .empty {
-          animation: fadeIn 0.5s ease-out forwards;
-        }
-        @media (max-width: 1024px) {
-          :root {
-            --slide-min-height: min(80vh, 860px);
-            --slide-frame-min-height: clamp(280px, 58vh, 700px);
-          }
-          .slide-caption {
-            align-items: center;
-          }
-        }
-        @media (max-width: 768px) {
-          main {
-            padding: 20px 14px 34px;
-          }
-          h1 {
-            font-size: clamp(2rem, 6vw, 2.8rem);
-          }
-          .batch-info {
-            flex-direction: column;
-            gap: 6px;
-          }
-          .actions {
-            margin-top: 16px;
-          }
-          .actions a,
-          .actions button {
-            width: min(100%, 320px);
-          }
-          .carousel-shell {
-            border: none;
-            border-radius: 0;
-            box-shadow: none;
-            overflow: visible;
-            backdrop-filter: none;
-            background: transparent;
-          }
-          .carousel-viewport {
-            overflow: visible;
-            scroll-snap-type: none;
-          }
-          .carousel-track {
-            display: block;
-          }
-          .slide {
-            min-height: auto;
-            padding: 0;
-            gap: 10px;
-            margin-bottom: 20px;
-          }
-          .slide-frame {
-            min-height: auto;
-            padding: 0;
-            border: none;
-            background: transparent;
-            box-shadow: none;
-          }
-          .slide-frame::after {
-            display: none;
-          }
-          .slide-image,
-          .slide-video {
-            width: 100%;
-            height: auto;
-            border-radius: var(--radius-lg);
-          }
-          .slide-video {
-            background: #000;
-          }
-          .slide.is-active .slide-frame {
-            border-color: transparent;
-            box-shadow: none;
-          }
-          .slide-caption {
-            flex-direction: column;
-            align-items: flex-start;
-            padding: 0 2px;
-            gap: 8px;
-          }
-          .slide-kicker {
-            display: none;
-          }
-          .slide-title {
-            font-size: clamp(1.05rem, 4.8vw, 1.3rem);
-          }
-          .open-original {
-            width: auto;
-          }
-          .carousel-controls,
-          .carousel-status,
-          .carousel-dots,
-          .carousel-footer {
-            display: none !important;
-          }
-          .empty {
-            padding: 52px 20px;
-          }
-        }
-        @media (max-width: 480px) {
-          :root {
-            --slide-min-height: auto;
-            --slide-frame-min-height: auto;
-          }
-          h1 {
-            font-size: clamp(1.65rem, 8vw, 2.1rem);
-          }
-          .batch-summary {
-            font-size: 0.9rem;
-          }
-          .actions a,
-          .actions button {
-            width: 100%;
-            min-width: 0;
-          }
-          .slide-title {
-            font-size: clamp(1rem, 5vw, 1.2rem);
-          }
-        }
-        @media (max-height: 720px) and (orientation: landscape) {
-          :root {
-            --slide-min-height: min(92vh, 640px);
-            --slide-frame-min-height: clamp(220px, 58vh, 520px);
-          }
-          main {
-            padding-top: 18px;
-            padding-bottom: 24px;
-          }
-          .header {
-            margin-bottom: 16px;
-            padding-bottom: 14px;
-          }
-          .carousel {
-            margin-top: 18px;
-          }
-          .slide-caption {
-            flex-direction: row;
-            align-items: center;
-          }
-        }
+        .menu-item:hover { background: var(--surface-elevated); }
+
         @media (prefers-reduced-motion: reduce) {
-          html {
-            scroll-behavior: auto;
-          }
-          .carousel-viewport {
-            scroll-behavior: auto;
-          }
-          *,
-          *::before,
-          *::after {
+          *, *::before, *::after {
             animation-duration: 0.01ms !important;
-            animation-iteration-count: 1 !important;
             transition-duration: 0.01ms !important;
           }
         }
         @media print {
-          body {
-            background: white;
-            color: #000;
-          }
-          main {
-            max-width: none;
-            padding: 0;
-          }
-          .actions,
-          .carousel-controls,
-          .carousel-status,
-          .carousel-dots {
-            display: none !important;
-          }
-          .header {
-            border-bottom: none;
-            margin-bottom: 20px;
-          }
-          .carousel-shell {
-            border: none;
-            box-shadow: none;
-            background: transparent;
-          }
-          .carousel-viewport {
-            overflow: visible;
-          }
-          .carousel-track {
+          .app-bar, .theater, .menu-backdrop { display: none !important; }
+          body { background: #fff; color: #000; }
+          .gallery-grid {
             display: block;
           }
-          .slide {
-            padding: 0 0 28px;
-            min-height: auto;
-            break-after: page;
-            page-break-after: always;
+          .grid-tile {
+            break-inside: avoid;
+            margin-bottom: 24px;
+            transform: none !important;
           }
-          .slide-frame {
-            display: block;
-            min-height: auto;
-            padding: 0;
-            border: none;
-            box-shadow: none;
-            background: transparent;
-          }
-          .slide-frame::after {
-            display: none;
-          }
-          .slide-image,
-          .slide-video {
-            width: 100%;
-            height: auto;
-            max-height: 90vh;
-          }
-          .slide-caption {
-            padding: 12px 0 0;
-          }
+          .tile-frame { aspect-ratio: auto; }
+          .tile-media { width: 100%; height: auto; object-fit: contain; }
+          .tile-name { display: block; color: #333; }
         }
       </style>
-      <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Cormorant+Garamond:wght@600&display=swap" rel="stylesheet">
     </head>
     <body>
-      <main>
-        <div class="header">
-          <h1>Batch ${batchId}</h1>
-          <div class="batch-info">
-            <span>${totalItems} ${totalItems === 1 ? singular : plural}</span>
-            <span class="batch-id">${batchId}</span>
-          </div>
-          <p class="batch-summary">${batchSummary}</p>
+      <header class="app-bar">
+        <div class="app-bar-start">
+          <span class="app-title">AssetLink</span>
+          ${totalItems > 0 ? `<span class="app-count">${countLabel}</span>` : `<span class="app-count">${batchId}</span>`}
         </div>
-        <div class="actions">
-          <a href="${batchJsonUrl}" target="_blank" rel="noreferrer">
-            View JSON Data
-          </a>
-          <button type="button" data-print>
-            Print Gallery
+        <div class="app-actions">
+          <button type="button" class="icon-btn" data-menu-open aria-label="More options" aria-haspopup="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="5" r="1.5" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.5" fill="currentColor" stroke="none"/><circle cx="12" cy="19" r="1.5" fill="currentColor" stroke="none"/></svg>
           </button>
         </div>
-        ${totalItems > 0 ? `
-          <section class="carousel" aria-label="Batch ${singular} carousel" data-carousel${hasVideo ? ' data-carousel-has-video="true"' : ""}>
-            <div class="carousel-shell">
-              <div class="carousel-viewport" data-carousel-viewport tabindex="0">
-                <div class="carousel-track">
-                  ${mediaSlides}
-                </div>
-              </div>
-              ${carouselControls}
-            </div>
-            <div class="carousel-footer">
-              <p class="carousel-status" data-carousel-status aria-live="polite">${label} 1 of ${totalItems}</p>
-              ${carouselDots}
-            </div>
-          </section>
-        ` : `
-          <div class="empty">
-            <div class="empty-icon">${emptyIcon}</div>
-            <h2 class="empty-title">No ${plural} uploaded yet</h2>
-            <p class="empty-description">Upload ${plural} to browse them here in a full-size carousel.</p>
+      </header>
+
+      ${totalItems > 0 ? `
+        <div class="gallery">
+          <div class="gallery-grid">
+            ${gridTiles}
           </div>
-        `}
-      </main>
+        </div>
+
+        <div class="theater" data-theater aria-hidden="true" role="dialog" aria-modal="true" aria-label="Media viewer">
+          <div class="theater-bar">
+            <button type="button" class="icon-btn" data-theater-close aria-label="Close">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true"><path d="M18 6L6 18M6 6l12 12"/></svg>
+            </button>
+            <span class="caption" data-theater-caption>${firstName}</span>
+            <span class="counter" data-theater-counter>1 / ${totalItems}</span>
+          </div>
+          <div class="stage-wrap" data-stage-wrap>
+            ${totalItems > 1 ? `<button type="button" class="stage-nav prev" data-theater-prev aria-label="Previous">&#8249;</button>` : ""}
+            ${theaterSlides}
+            ${totalItems > 1 ? `<button type="button" class="stage-nav next" data-theater-next aria-label="Next">&#8250;</button>` : ""}
+          </div>
+          ${totalItems > 1 ? `<div class="filmstrip" data-filmstrip>${filmstripThumbs}</div>` : ""}
+        </div>
+      ` : `
+        <div class="empty">
+          <div class="empty-icon">${emptyIcon}</div>
+          <h2 class="empty-title">Nothing here yet</h2>
+          <p class="empty-desc">Upload ${plural} to see them in this gallery.</p>
+        </div>
+      `}
+
+      <div class="menu-backdrop" data-menu aria-hidden="true">
+        <div class="menu-sheet" role="menu">
+          <a href="${batchJsonUrl}" class="menu-item" target="_blank" rel="noreferrer" role="menuitem">View JSON</a>
+          <button type="button" class="menu-item" data-print role="menuitem">Print Gallery</button>
+        </div>
+      </div>
+
       <script>
         (() => {
-          const printButton = document.querySelector('[data-print]');
-          printButton?.addEventListener('click', () => window.print());
+          const ITEMS = ${JSON.stringify(mediaItems.map((item) => ({
+            name: item.originalName || `Uploaded ${singular}`,
+            type: item.type
+          })))};
+          const HAS_VIDEO = ${hasVideo ? "true" : "false"};
+          const TOTAL = ${totalItems};
 
-          const carousel = document.querySelector('[data-carousel]');
-          if (!carousel) {
+          document.querySelector('[data-print]')?.addEventListener('click', () => {
+            document.querySelector('[data-menu]')?.classList.remove('is-open');
+            window.print();
+          });
+
+          const menu = document.querySelector('[data-menu]');
+          document.querySelector('[data-menu-open]')?.addEventListener('click', () => {
+            menu?.classList.add('is-open');
+            menu?.setAttribute('aria-hidden', 'false');
+          });
+          menu?.addEventListener('click', (event) => {
+            if (event.target === menu) {
+              menu.classList.remove('is-open');
+              menu.setAttribute('aria-hidden', 'true');
+            }
+          });
+
+          const theater = document.querySelector('[data-theater]');
+          if (!theater || !TOTAL) {
             return;
           }
 
-          const isMobileLayout = window.matchMedia("(max-width: 768px)").matches;
-          if (isMobileLayout) {
-            return;
-          }
-
-          const viewport = carousel.querySelector('[data-carousel-viewport]');
-          const slides = Array.from(carousel.querySelectorAll('[data-carousel-slide]'));
-          const prevButton = carousel.querySelector('[data-carousel-prev]');
-          const nextButton = carousel.querySelector('[data-carousel-next]');
-          const status = carousel.querySelector('[data-carousel-status]');
-          const dots = Array.from(carousel.querySelectorAll('[data-carousel-dot]'));
+          const stageSlides = Array.from(theater.querySelectorAll('[data-stage-slide]'));
+          const filmThumbs = Array.from(theater.querySelectorAll('[data-film-index]'));
+          const caption = theater.querySelector('[data-theater-caption]');
+          const counter = theater.querySelector('[data-theater-counter]');
+          const prevBtn = theater.querySelector('[data-theater-prev]');
+          const nextBtn = theater.querySelector('[data-theater-next]');
+          const stageWrap = theater.querySelector('[data-stage-wrap]');
+          const filmstrip = theater.querySelector('[data-filmstrip]');
           let currentIndex = 0;
+          let touchStartX = 0;
 
-          if (!slides.length) {
-            return;
-          }
-
-          slides.forEach((slide, index) => {
-            slide.dataset.carouselSlideIndex = String(index);
-          });
-
-          const updateState = (index) => {
-            const total = slides.length;
-            currentIndex = ((index % total) + total) % total;
-
-            slides.forEach((slide, slideIndex) => {
-              slide.classList.toggle('is-active', slideIndex === currentIndex);
-            });
-
-            dots.forEach((dot, dotIndex) => {
-              const isActive = dotIndex === currentIndex;
-              dot.classList.toggle('is-active', isActive);
-              dot.setAttribute('aria-current', isActive ? 'true' : 'false');
-            });
-
-            if (status) {
-              const slideLabel = slides[currentIndex]?.dataset.slideLabel || '${label}';
-              status.textContent = slideLabel + ' ' + (currentIndex + 1) + ' of ' + total;
+          const pauseInactiveVideos = () => {
+            if (!HAS_VIDEO) {
+              return;
             }
-
-            if (carousel.dataset.carouselHasVideo === 'true') {
-              slides.forEach((slide, slideIndex) => {
-                if (slideIndex !== currentIndex) {
-                  slide.querySelector('video')?.pause();
-                }
-              });
-            }
-          };
-
-          const scrollToIndex = (index, behavior) => {
-            updateState(index);
-            slides[currentIndex].scrollIntoView({
-              behavior: behavior || 'smooth',
-              block: 'nearest',
-              inline: 'start'
+            stageSlides.forEach((slide, index) => {
+              if (index !== currentIndex) {
+                slide.querySelector('video')?.pause();
+              }
             });
           };
 
-          if ("IntersectionObserver" in window) {
-            const observer = new IntersectionObserver((entries) => {
-              let visibleSlide = null;
+          const scrollFilmstrip = (index) => {
+            const thumb = filmThumbs[index];
+            if (!thumb || !filmstrip) {
+              return;
+            }
+            const left = thumb.offsetLeft - (filmstrip.clientWidth - thumb.clientWidth) / 2;
+            filmstrip.scrollTo({ left: Math.max(0, left), behavior: 'smooth' });
+          };
 
-              entries.forEach((entry) => {
-                if (!entry.isIntersecting) {
-                  return;
-                }
+          const goTo = (index) => {
+            currentIndex = ((index % TOTAL) + TOTAL) % TOTAL;
 
-                if (!visibleSlide || entry.intersectionRatio > visibleSlide.intersectionRatio) {
-                  visibleSlide = entry;
-                }
-              });
-
-              if (!visibleSlide) {
-                return;
-              }
-
-              const nextIndex = Number(visibleSlide.target.dataset.carouselSlideIndex);
-              if (!Number.isNaN(nextIndex) && nextIndex !== currentIndex) {
-                updateState(nextIndex);
-              }
-            }, {
-              root: viewport,
-              threshold: [0.55, 0.75, 0.9]
+            stageSlides.forEach((slide, slideIndex) => {
+              const active = slideIndex === currentIndex;
+              slide.classList.toggle('is-active', active);
+              slide.hidden = !active;
             });
 
-            slides.forEach((slide) => {
-              observer.observe(slide);
+            filmThumbs.forEach((thumb, thumbIndex) => {
+              const active = thumbIndex === currentIndex;
+              thumb.classList.toggle('is-active', active);
+              thumb.setAttribute('aria-current', active ? 'true' : 'false');
             });
-          }
 
-          prevButton?.addEventListener('click', () => scrollToIndex(currentIndex - 1));
-          nextButton?.addEventListener('click', () => scrollToIndex(currentIndex + 1));
+            if (caption) {
+              caption.textContent = ITEMS[currentIndex]?.name || '';
+            }
+            if (counter) {
+              counter.textContent = (currentIndex + 1) + ' / ' + TOTAL;
+            }
+            if (prevBtn) {
+              prevBtn.disabled = TOTAL <= 1;
+            }
+            if (nextBtn) {
+              nextBtn.disabled = TOTAL <= 1;
+            }
 
-          dots.forEach((dot) => {
-            dot.addEventListener('click', () => {
-              const targetIndex = Number(dot.dataset.targetIndex);
-              if (Number.isNaN(targetIndex)) {
-                return;
+            pauseInactiveVideos();
+            scrollFilmstrip(currentIndex);
+          };
+
+          const openTheater = (index) => {
+            goTo(index);
+            theater.classList.add('is-open');
+            theater.setAttribute('aria-hidden', 'false');
+            document.body.style.overflow = 'hidden';
+          };
+
+          const closeTheater = () => {
+            theater.classList.remove('is-open');
+            theater.setAttribute('aria-hidden', 'true');
+            document.body.style.overflow = '';
+            pauseInactiveVideos();
+            stageSlides.forEach((slide) => {
+              slide.querySelector('video')?.pause();
+            });
+          };
+
+          document.querySelectorAll('[data-open-index]').forEach((tile) => {
+            tile.addEventListener('click', () => {
+              const index = Number(tile.dataset.openIndex);
+              if (!Number.isNaN(index)) {
+                openTheater(index);
               }
-
-              scrollToIndex(targetIndex);
             });
           });
+
+          theater.querySelector('[data-theater-close]')?.addEventListener('click', closeTheater);
+          prevBtn?.addEventListener('click', () => goTo(currentIndex - 1));
+          nextBtn?.addEventListener('click', () => goTo(currentIndex + 1));
+
+          filmThumbs.forEach((thumb) => {
+            thumb.addEventListener('click', () => {
+              const index = Number(thumb.dataset.filmIndex);
+              if (!Number.isNaN(index)) {
+                goTo(index);
+              }
+            });
+          });
+
+          stageWrap?.addEventListener('click', (event) => {
+            if (event.target === stageWrap || event.target.closest('[data-stage-image]')) {
+              if (TOTAL === 1) {
+                closeTheater();
+              }
+            }
+          });
+
+          stageWrap?.addEventListener('touchstart', (event) => {
+            touchStartX = event.changedTouches[0]?.clientX || 0;
+          }, { passive: true });
+
+          stageWrap?.addEventListener('touchend', (event) => {
+            if (TOTAL <= 1) {
+              return;
+            }
+            const deltaX = (event.changedTouches[0]?.clientX || 0) - touchStartX;
+            if (Math.abs(deltaX) < 48) {
+              return;
+            }
+            if (deltaX < 0) {
+              goTo(currentIndex + 1);
+            } else {
+              goTo(currentIndex - 1);
+            }
+          }, { passive: true });
 
           window.addEventListener('keydown', (event) => {
+            if (!theater.classList.contains('is-open')) {
+              return;
+            }
+            if (event.key === 'Escape') {
+              event.preventDefault();
+              closeTheater();
+              return;
+            }
             if (event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey) {
               return;
             }
-
             if (event.key === 'ArrowLeft') {
               event.preventDefault();
-              scrollToIndex(currentIndex - 1);
-              return;
-            }
-
-            if (event.key === 'ArrowRight') {
+              goTo(currentIndex - 1);
+            } else if (event.key === 'ArrowRight') {
               event.preventDefault();
-              scrollToIndex(currentIndex + 1);
-              return;
-            }
-
-            if (event.key === 'Home') {
-              event.preventDefault();
-              scrollToIndex(0);
-              return;
-            }
-
-            if (event.key === 'End') {
-              event.preventDefault();
-              scrollToIndex(slides.length - 1);
+              goTo(currentIndex + 1);
             }
           });
 
-          updateState(0);
+          if (TOTAL === 1) {
+            openTheater(0);
+          } else {
+            goTo(0);
+          }
         })();
       </script>
     </body>
